@@ -3,6 +3,7 @@
 import React, { useState, useRef } from "react";
 import { UploadCloud, FileText, Sparkles, CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
 import { AnswerKeyData } from "@/types/grading";
+import { SAMPLE_AISCC_KEY } from "@/constants/sampleKey";
 
 interface Step1UploadKeyProps {
   onKeyLoaded: (keyData: AnswerKeyData) => void;
@@ -33,6 +34,11 @@ export const Step1UploadKey: React.FC<Step1UploadKeyProps> = ({ onKeyLoaded }) =
       });
 
       if (!res.ok) {
+        if (res.status === 404 || res.status === 502 || res.status === 503) {
+          throw new Error(
+            "Backend grading engine is offline or unreachable on port 8001. Please run 'run_backend.bat' locally (or verify NEXT_PUBLIC_BACKEND_URL on Vercel)."
+          );
+        }
         const errorData = await res.json().catch(() => ({}));
         throw new Error(errorData.detail || `Upload failed (${res.status})`);
       }
@@ -46,16 +52,12 @@ export const Step1UploadKey: React.FC<Step1UploadKeyProps> = ({ onKeyLoaded }) =
     }
   };
 
-  const handleLoadSample = async () => {
+  const handleLoadSample = () => {
     setIsLoading(true);
     setErrorMsg(null);
     try {
-      const res = await fetch("/api/sample/answer-key");
-      if (!res.ok) {
-        throw new Error("Could not load sample answer key");
-      }
-      const keyData: AnswerKeyData = await res.json();
-      onKeyLoaded(keyData);
+      // Load preconfigured AISCC key directly
+      onKeyLoaded(SAMPLE_AISCC_KEY);
     } catch (err: any) {
       setErrorMsg(err.message || "Failed to load sample key.");
     } finally {

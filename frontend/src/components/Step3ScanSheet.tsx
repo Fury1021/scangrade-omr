@@ -182,6 +182,11 @@ export const Step3ScanSheet: React.FC<Step3ScanSheetProps> = ({
       });
 
       if (!res.ok) {
+        if (res.status === 404 || res.status === 502 || res.status === 503) {
+          throw new Error(
+            "Backend grading engine is offline or unreachable on port 8001. Please run 'run_backend.bat' locally (or verify NEXT_PUBLIC_BACKEND_URL in Vercel)."
+          );
+        }
         const errData = await res.json().catch(() => ({}));
         throw new Error(errData.detail || `Grading failed (${res.status})`);
       }

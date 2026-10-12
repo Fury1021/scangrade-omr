@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useState } from "react";
-import { CheckCircle2, RotateCcw, ShieldCheck, Moon, Sun, AlertTriangle } from "lucide-react";
+import React, { useState, useEffect } from "react";
+import { CheckCircle2, RotateCcw, ShieldCheck, Moon, Sun, AlertTriangle, Activity } from "lucide-react";
 import { GradingStep } from "@/types/grading";
 
 interface NavbarProps {
@@ -17,6 +17,29 @@ export const Navbar: React.FC<NavbarProps> = ({
 }) => {
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [isDark, setIsDark] = useState(false);
+  const [backendStatus, setBackendStatus] = useState<"checking" | "online" | "offline">("checking");
+
+  useEffect(() => {
+    const checkHealth = async () => {
+      try {
+        const res = await fetch("/api/health", { cache: "no-store" });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.status === "online") {
+            setBackendStatus("online");
+            return;
+          }
+        }
+        setBackendStatus("offline");
+      } catch (e) {
+        setBackendStatus("offline");
+      }
+    };
+
+    checkHealth();
+    const interval = setInterval(checkHealth, 8000);
+    return () => clearInterval(interval);
+  }, []);
 
   const toggleTheme = () => {
     setIsDark(!isDark);
@@ -51,6 +74,39 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
 
           <div className="flex items-center gap-3">
+            {/* Live Backend Status Badge */}
+            <div
+              className={`hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border ${
+                backendStatus === "online"
+                  ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800"
+                  : backendStatus === "checking"
+                  ? "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400 border-slate-200"
+                  : "bg-red-50 text-red-700 dark:bg-red-950/60 dark:text-red-300 border-red-200 dark:border-red-800"
+              }`}
+              title={
+                backendStatus === "online"
+                  ? "FastAPI OpenCV Engine Connected"
+                  : "Backend offline. Run 'run_backend.bat' to start the Python server on port 8001."
+              }
+            >
+              <span
+                className={`w-2 h-2 rounded-full ${
+                  backendStatus === "online"
+                    ? "bg-emerald-500 animate-pulse"
+                    : backendStatus === "checking"
+                    ? "bg-slate-400"
+                    : "bg-red-500"
+                }`}
+              />
+              <span>
+                {backendStatus === "online"
+                  ? "Engine Online"
+                  : backendStatus === "checking"
+                  ? "Connecting..."
+                  : "Engine Offline"}
+              </span>
+            </div>
+
             <button
               onClick={toggleTheme}
               aria-label="Toggle theme"
