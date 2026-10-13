@@ -21,7 +21,7 @@ from backend.app.models import (
     GradingRules,
     AnswerKeyData
 )
-from backend.app.templates.aiscc_160 import get_aiscc_grid_points, PAGE_WIDTH_PT, PAGE_HEIGHT_PT
+from backend.app.templates.aiscc_160 import get_aiscc_grid_points, PAGE_WIDTH_PT, PAGE_HEIGHT_PT, SECTIONS
 
 CANONICAL_WIDTH = 2000
 CANONICAL_HEIGHT = int(2000 * (PAGE_HEIGHT_PT / PAGE_WIDTH_PT))  # ~3058 px
@@ -30,6 +30,115 @@ class OMREngine:
     def __init__(self, rules: Optional[GradingRules] = None):
         self.rules = rules or GradingRules()
         
+    def detect_dynamic_grid(self, img: np.ndarray) -> Tuple[Optional[List[Dict]], Optional[np.ndarray]]:
+        """
+        Dynamically detects the 160-question answer bubble grid from square contours.
+        Handles:
+        - Cropped screenshots (no header / control number)
+        - Mobile camera captures with arbitrary margins
+        - Full-page scans / PDFs with headers
+        
+        Returns (grid, thresh_img) or (None, None) if dynamic detection is not viable.
+        """
+        H, W = img.shape[:2]
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if len(img.shape) == 3 else img
+        _, thresh = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY_INV)
+        contours, _ = cv2.findContours(thresh, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
+        
+        min_dim = int(W * 0.010)
+        max_dim = int(W * 0.040)
+        
+        boxes = []
+        for c in contours:
+            x, y, w, h = cv2.boundingRect(c)
+            aspect = w / float(h)
+            if min_dim <= w <= max_dim and min_dim <= h <= max_dim and 0.75 <= aspect <= 1.30:
+                boxes.append((x, y, w, h))
+                
+        if len(boxes) < 200:
+            return None, None
+            
+        med_w = np.median([b[2] for b in boxes])
+        med_h = np.median([b[3] for b in boxes])
+        
+        # Deduplicate concentric / inner contours
+        boxes = sorted(boxes, key=lambda b: (b[1], b[0]))
+        dedup = []
+        thresh_dist = med_w * 0.4
+        for b in boxes:
+            cx = b[0] + b[2] / 2.0
+            cy = b[1] + b[3] / 2.0
+            if not any(abs(cx - (ex[0] + ex[2] / 2.0)) < thresh_dist and abs(cy - (ex[1] + ex[3] / 2.0)) < thresh_dist for ex in dedup):
+                dedup.append(b)
+                
+        valid = [b for b in dedup if 0.7 * med_w <= b[2] <= 1.3 * med_w and 0.7 * med_h <= b[3] <= 1.3 * med_h]
+        valid.sort(key=lambda b: b[1])
+        
+        if len(valid) < 200:
+            return None, None
+            
+        # If there are header boxes (> 640 boxes, e.g. 661 in full sheet with 21 header boxes),
+        # isolate the bottom continuous block of 640 answer boxes
+        if len(valid) > 640:
+            grid_boxes = valid[-640:]
+        else:
+            grid_boxes = valid
+            
+        # Cluster into 4 columns by X coordinate using k-means
+        x_centers = np.array([b[0] + b[2] / 2.0 for b in grid_boxes]).reshape(-1, 1).astype(np.float32)
+        criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 100, 0.2)
+        _, labels, centers = cv2.kmeans(x_centers, 4, None, criteria, 10, cv2.KMEANS_PP_CENTERS)
+        sorted_order = np.argsort(centers.flatten())
+        label_map = {orig: i for i, orig in enumerate(sorted_order)}
+        
+        cols = {0: [], 1: [], 2: [], 3: []}
+        for i, b in enumerate(grid_boxes):
+            col_idx = label_map[int(labels[i][0])]
+            cols[col_idx].append(b)
+            
+        for c_idx in range(4):
+            if len(cols[c_idx]) < 40:
+                return None, None
+                
+        grid = []
+        for c_idx in range(4):
+            c_boxes = cols[c_idx]
+            sec_name = SECTIONS[c_idx] if c_idx < len(SECTIONS) else f"Section {c_idx + 1}"
+            
+            # 4 options (A, B, C, D) X centers
+            opt_xs = np.array([b[0] + b[2] / 2.0 for b in c_boxes]).reshape(-1, 1).astype(np.float32)
+            _, _, opt_centers = cv2.kmeans(opt_xs, 4, None, criteria, 10, cv2.KMEANS_PP_CENTERS)
+            sorted_opts = sorted(opt_centers.flatten())
+            
+            # 40 rows Y centers
+            y_centers = np.array([b[1] + b[3] / 2.0 for b in c_boxes]).reshape(-1, 1).astype(np.float32)
+            _, _, row_centers = cv2.kmeans(y_centers, 40, None, criteria, 10, cv2.KMEANS_PP_CENTERS)
+            sorted_rows = sorted(row_centers.flatten())
+            
+            for r_idx in range(40):
+                global_q = c_idx * 40 + (r_idx + 1)
+                y_center_px = int(sorted_rows[r_idx])
+                q_data = {
+                    "question_number": global_q,
+                    "local_question_number": r_idx + 1,
+                    "section": sec_name,
+                    "y_center": y_center_px,
+                    "box_w": int(med_w),
+                    "box_h": int(med_h),
+                    "options": {}
+                }
+                for opt_idx, opt_char in enumerate(["A", "B", "C", "D"]):
+                    x_center_px = int(sorted_opts[opt_idx])
+                    x_min = x_center_px - int(med_w) // 2
+                    y_min = y_center_px - int(med_h) // 2
+                    q_data["options"][opt_char] = {
+                        "center": (x_center_px, y_center_px),
+                        "bbox": [x_min, y_min, int(med_w), int(med_h)]
+                    }
+                grid.append(q_data)
+                
+        return grid, thresh
+
     def process_image(
         self,
         image_bytes: bytes,
@@ -40,11 +149,10 @@ class OMREngine:
         """
         Runs the full OMR pipeline:
         1. Decode image & apply manual rotation if requested
-        2. Detect paper boundaries & apply perspective warp
-        3. Preprocess (CLAHE, thresholding)
-        4. Detect bubble shading & compute fill ratios
-        5. Compare against answer key
-        6. Generate annotated overlay image
+        2. Detect dynamic answer grid (or detect paper boundary & warp)
+        3. Measure bubble shading & compute fill ratios
+        4. Compare against answer key
+        5. Generate annotated overlay image
         
         Returns:
             questions: List of QuestionAnswer
@@ -68,43 +176,52 @@ class OMREngine:
         elif rotation_degrees == 270:
             raw_img = cv2.rotate(raw_img, cv2.ROTATE_90_COUNTERCLOCKWISE)
             
-        # 2. Perspective correction
-        warped_img = self.detect_and_warp_paper(raw_img) if auto_align else cv2.resize(raw_img, (CANONICAL_WIDTH, CANONICAL_HEIGHT))
+        # 2. Check for dynamic grid directly on raw_img (works for cropped screenshots, phone photos)
+        dynamic_grid, dynamic_thresh = self.detect_dynamic_grid(raw_img) if auto_align else (None, None)
         
-        # 3. Preprocess image
-        gray = cv2.cvtColor(warped_img, cv2.COLOR_BGR2GRAY)
+        if dynamic_grid is not None and dynamic_thresh is not None:
+            grid = dynamic_grid
+            target_img = raw_img
+            working_ink = dynamic_thresh
+            shift_x, shift_y = 0, 0
+            warped_img = raw_img
+        else:
+            # Perspective correction fallback
+            warped_img = self.detect_and_warp_paper(raw_img) if auto_align else cv2.resize(raw_img, (CANONICAL_WIDTH, CANONICAL_HEIGHT))
+            
+            # Try dynamic grid on warped image
+            dynamic_grid_w, dynamic_thresh_w = self.detect_dynamic_grid(warped_img) if auto_align else (None, None)
+            if dynamic_grid_w is not None and dynamic_thresh_w is not None:
+                grid = dynamic_grid_w
+                target_img = warped_img
+                working_ink = dynamic_thresh_w
+                shift_x, shift_y = 0, 0
+            else:
+                # Preprocess canonical image with CLAHE and adaptive threshold
+                target_img = warped_img
+                gray = cv2.cvtColor(warped_img, cv2.COLOR_BGR2GRAY)
+                clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8))
+                enhanced = clahe.apply(gray)
+                binary = cv2.adaptiveThreshold(
+                    enhanced,
+                    255,
+                    cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                    cv2.THRESH_BINARY_INV,
+                    blockSize=25,
+                    C=10
+                )
+                hsv = cv2.cvtColor(warped_img, cv2.COLOR_BGR2HSV)
+                blue_mask = cv2.inRange(hsv, np.array([90, 40, 40]), np.array([140, 255, 220]))
+                working_ink = cv2.bitwise_or(binary, blue_mask)
+                
+                # Standard template grid
+                grid = get_aiscc_grid_points(CANONICAL_WIDTH, CANONICAL_HEIGHT)
+                shift_x, shift_y = self._detect_fine_alignment_shift(working_ink, grid)
         
-        # CLAHE for handling uneven illumination (shadows, phone camera lighting)
-        clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8))
-        enhanced = clahe.apply(gray)
-        
-        # Adaptive thresholding: marked ink becomes white (255), white paper becomes black (0)
-        binary = cv2.adaptiveThreshold(
-            enhanced,
-            255,
-            cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-            cv2.THRESH_BINARY_INV,
-            blockSize=25,
-            C=10
-        )
-        
-        # Also compute blue/black pen mask from HSV saturation & value
-        hsv = cv2.cvtColor(warped_img, cv2.COLOR_BGR2HSV)
-        # Blue pen detection (Hue 100-140, Saturation > 50)
-        blue_mask = cv2.inRange(hsv, np.array([90, 40, 40]), np.array([140, 255, 220]))
-        # Combine pencil/pen binary with blue ink
-        combined_ink = cv2.bitwise_or(binary, blue_mask)
-        
-        # 4. Get Grid based on answer key and template
-        # Default to AISCC 160 grid
-        grid = get_aiscc_grid_points(CANONICAL_WIDTH, CANONICAL_HEIGHT)
-        
-        # Dynamic alignment shift detection (compensate for small printer margin offsets)
-        shift_x, shift_y = self._detect_fine_alignment_shift(combined_ink, grid)
-        
-        # 5. Measure fill ratios and classify marks
+        # 3. Measure fill ratios and classify marks
         question_answers = []
-        annotated_img = warped_img.copy()
+        annotated_img = target_img.copy()
+        target_h, target_w = target_img.shape[:2]
         
         fill_thresh = self.rules.fill_threshold
         uncertain_thresh = self.rules.uncertain_lower_threshold
@@ -133,26 +250,22 @@ class OMREngine:
                 
                 x1 = max(0, x + margin_x)
                 y1 = max(0, y + margin_y)
-                x2 = min(CANONICAL_WIDTH, x + box_w - margin_x)
-                y2 = min(CANONICAL_HEIGHT, y + box_h - margin_y)
+                x2 = min(target_w, x + box_w - margin_x)
+                y2 = min(target_h, y + box_h - margin_y)
                 
-                roi = combined_ink[y1:y2, x1:x2]
+                roi = working_ink[y1:y2, x1:x2]
                 
                 if roi.size > 0:
                     fill_ratio = float(np.mean(roi) / 255.0)
                 else:
                     fill_ratio = 0.0
                     
-                is_marked = fill_ratio >= fill_thresh
                 choices.append(ChoiceOption(
                     id=opt,
                     fill_ratio=round(fill_ratio, 3),
-                    is_marked=is_marked,
+                    is_marked=False,
                     bbox=[int(x), int(y), int(box_w), int(box_h)]
                 ))
-                
-                if is_marked:
-                    marked_choices.append((opt, fill_ratio))
                     
             # Sort choices by fill ratio descending
             sorted_by_fill = sorted(choices, key=lambda c: c.fill_ratio, reverse=True)
@@ -165,6 +278,12 @@ class OMREngine:
             confidence = 1.0
             points = 0.0
             
+            # Check for multiple marks (competing shaded bubbles)
+            is_competing_multiple = (
+                (top_fill >= 0.40 and second_fill >= 0.35 and (top_fill - second_fill < ambiguity_margin)) or
+                (top_fill >= 0.25 and second_fill >= 0.25 and (top_fill - second_fill < 0.05))
+            )
+            
             # Classification logic
             if top_fill < uncertain_thresh:
                 # Completely blank
@@ -172,32 +291,34 @@ class OMREngine:
                 status = "unanswered"
                 confidence = max(0.5, 1.0 - top_fill)
                 needs_review = False
-            elif uncertain_thresh <= top_fill < fill_thresh:
+            elif is_competing_multiple:
+                # Genuinely ambiguous: multiple shaded marks or neck-and-neck top two marks
+                competing_opts = [c.id for c in choices if c.fill_ratio >= max(0.25, top_fill - ambiguity_margin)]
+                student_answer = ", ".join(competing_opts) if len(competing_opts) > 1 else f"{sorted_by_fill[0].id}?"
+                status = "ambiguous"
+                confidence = 0.40
+                needs_review = True
+            elif top_fill >= fill_thresh or (top_fill >= 0.25 and (top_fill - second_fill >= 0.05)):
+                # Single clear mark
+                student_answer = sorted_by_fill[0].id
+                confidence = min(1.0, 0.70 + (top_fill - second_fill) * 0.5)
+                if correct_key == student_answer:
+                    status = "correct"
+                    points = self.rules.points_per_correct
+                else:
+                    status = "incorrect"
+                    points = self.rules.points_per_incorrect
+            else:
                 # Weak mark / smudge / eraser mark
                 student_answer = sorted_by_fill[0].id
                 status = "ambiguous"
                 confidence = 0.45
                 needs_review = True
-            else:
-                # At least one marked choice
-                # Check for ambiguity: multiple marks or close competing marks
-                if len(marked_choices) > 1 or (top_fill - second_fill < ambiguity_margin and second_fill >= uncertain_thresh):
-                    student_answer = ", ".join([opt for opt, _ in marked_choices]) if len(marked_choices) > 1 else f"{sorted_by_fill[0].id}?"
-                    status = "ambiguous"
-                    confidence = 0.40
-                    needs_review = True
-                else:
-                    student_answer = sorted_by_fill[0].id
-                    confidence = min(1.0, 0.70 + (top_fill - second_fill) * 0.5)
-                    
-                    # Compare with correct answer
-                    if correct_key == student_answer:
-                        status = "correct"
-                        points = self.rules.points_per_correct
-                    else:
-                        status = "incorrect"
-                        points = self.rules.points_per_incorrect
-                        
+                
+            # Update is_marked for choices
+            for c in choices:
+                c.is_marked = bool(student_answer and (c.id == student_answer or c.id in student_answer.split(", ")))
+                
             # If key is blank, mark as neutral or correct
             if correct_key == "BLANK" and student_answer == "BLANK":
                 status = "correct"
@@ -219,7 +340,7 @@ class OMREngine:
             )
             question_answers.append(q_res)
             
-            # 6. Draw visual annotations on overlay
+            # 4. Draw visual annotations on overlay
             self._draw_question_annotation(annotated_img, q_res, choices)
             
         # Convert images to base64 for direct frontend response
@@ -350,6 +471,10 @@ class OMREngine:
         bgr_amber = (0, 175, 245)
         bgr_gray = (190, 190, 190)
         
+        line_thick = max(1, int(img.shape[1] / 650))
+        font_scale = max(0.35, img.shape[1] / 2200.0)
+        pad = max(1, line_thick)
+        
         correct_key = q.correct_answer
         student_ans = q.student_answer
         
@@ -361,26 +486,26 @@ class OMREngine:
             
             if q.status == "correct" and opt_letter == student_ans:
                 # Green box around student's correct mark
-                cv2.rectangle(img, (x-2, y-2), (x+w+2, y+h+2), bgr_green, 3)
+                cv2.rectangle(img, (x-pad, y-pad), (x+w+pad, y+h+pad), bgr_green, line_thick + 1)
                 # Small checkmark badge
-                cv2.putText(img, "+1", (x+w+4, y+h-2), cv2.FONT_HERSHEY_SIMPLEX, 0.45, bgr_green, 2)
+                cv2.putText(img, "+1", (x+w+pad+1, y+h-pad), cv2.FONT_HERSHEY_SIMPLEX, font_scale, bgr_green, line_thick)
             elif q.status == "incorrect":
                 if opt_letter == student_ans:
                     # Red box around student's wrong mark
-                    cv2.rectangle(img, (x-2, y-2), (x+w+2, y+h+2), bgr_red, 3)
+                    cv2.rectangle(img, (x-pad, y-pad), (x+w+pad, y+h+pad), bgr_red, line_thick + 1)
                     # Cross mark badge
-                    cv2.putText(img, "X", (x+w+4, y+h-2), cv2.FONT_HERSHEY_SIMPLEX, 0.45, bgr_red, 2)
+                    cv2.putText(img, "X", (x+w+pad+1, y+h-pad), cv2.FONT_HERSHEY_SIMPLEX, font_scale, bgr_red, line_thick)
                 elif opt_letter == correct_key:
-                    # Highlight missed correct answer with green dashed/double rectangle
-                    cv2.rectangle(img, (x-2, y-2), (x+w+2, y+h+2), bgr_green, 2)
+                    # Highlight missed correct answer with green rectangle
+                    cv2.rectangle(img, (x-pad, y-pad), (x+w+pad, y+h+pad), bgr_green, line_thick)
             elif q.status == "ambiguous":
                 if c.is_marked:
-                    cv2.rectangle(img, (x-2, y-2), (x+w+2, y+h+2), bgr_amber, 3)
-                    cv2.putText(img, "?", (x+w+4, y+h-2), cv2.FONT_HERSHEY_SIMPLEX, 0.5, bgr_amber, 2)
+                    cv2.rectangle(img, (x-pad, y-pad), (x+w+pad, y+h+pad), bgr_amber, line_thick + 1)
+                    cv2.putText(img, "?", (x+w+pad+1, y+h-pad), cv2.FONT_HERSHEY_SIMPLEX, font_scale, bgr_amber, line_thick)
             elif q.status == "unanswered":
                 if opt_letter == correct_key:
                     # Indicate the key they missed
-                    cv2.rectangle(img, (x-2, y-2), (x+w+2, y+h+2), (100, 200, 100), 1)
+                    cv2.rectangle(img, (x-pad, y-pad), (x+w+pad, y+h+pad), (100, 200, 100), line_thick)
 
     def _img_to_base64(self, img: np.ndarray, quality: int = 80) -> str:
         """Encodes an OpenCV image to JPEG Base64 data URI."""

@@ -98,3 +98,31 @@ def test_omr_engine_rotation():
         )
         assert len(questions) == 160
         assert annotated_url is not None
+
+def test_omr_engine_dynamic_grid_cropped_sheet():
+    """Verifies that OMREngine dynamically aligns and accurately grades cropped sheets with no headers."""
+    import cv2
+    from backend.app.services.pdf_extractor import extract_answer_key_from_bytes
+    
+    with open('backend/sample_data/AISCC_Batch_02_Answer_Key.pdf', 'rb') as f:
+        key_data = extract_answer_key_from_bytes(f.read())
+        
+    im = cv2.imread('backend/sample_data/sample_answer_key_300dpi.png')
+    assert im is not None, "Sample answer sheet image not found"
+    
+    # Crop out the entire top header (remove first 750 pixels)
+    cropped = im[750:, :]
+    _, enc = cv2.imencode('.png', cropped)
+    
+    engine = OMREngine()
+    questions, annotated_url, _, proc_time = engine.process_image(
+        image_bytes=enc.tobytes(),
+        answer_key=key_data,
+        auto_align=True
+    )
+    
+    assert len(questions) == 160
+    assert annotated_url.startswith("data:image/jpeg;base64,")
+    total_score = sum(q.points_awarded for q in questions)
+    assert total_score >= 155.0, f"Expected near-perfect score on cropped sheet, got {total_score}"
+
