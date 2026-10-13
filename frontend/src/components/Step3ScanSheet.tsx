@@ -12,10 +12,12 @@ import {
   Sparkles,
   ArrowLeft,
   VideoOff,
-  SwitchCamera
+  SwitchCamera,
+  Grid
 } from "lucide-react";
 import { AnswerKeyData, GradingResult, GradingRules } from "@/types/grading";
 import { processImageClientSide } from "@/utils/clientOmr";
+import { ScanGuideGrid } from "./ScanGuideGrid";
 
 interface Step3ScanSheetProps {
   answerKey: AnswerKeyData;
@@ -35,6 +37,10 @@ export const Step3ScanSheet: React.FC<Step3ScanSheetProps> = ({
   const [autoAlign, setAutoAlign] = useState<boolean>(true);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // Guide Grid state
+  const [showGuideGrid, setShowGuideGrid] = useState<boolean>(true);
+  const [gridMode, setGridMode] = useState<"exam-4col" | "rule-of-thirds">("exam-4col");
 
   // Candidate Metadata
   const [studentName, setStudentName] = useState<string>("Candidate #01");
@@ -253,35 +259,64 @@ export const Step3ScanSheet: React.FC<Step3ScanSheetProps> = ({
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left Column (2 spans): Capture / Preview Area */}
         <div className="lg:col-span-2 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 shadow-xs flex flex-col">
-          {/* Capture Mode Tabs */}
-          <div className="flex items-center gap-2 p-1 bg-slate-100 dark:bg-slate-800 rounded-xl mb-4 w-fit">
-            <button
-              onClick={() => {
-                setActiveTab("upload");
-              }}
-              className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition ${
-                activeTab === "upload"
-                  ? "bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-xs"
-                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900"
-              }`}
-            >
-              <UploadCloud className="w-3.5 h-3.5 inline mr-1.5" />
-              Upload Image / PDF
-            </button>
-            <button
-              onClick={() => {
-                setActiveTab("camera");
-                setCapturedImage(null);
-              }}
-              className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition ${
-                activeTab === "camera"
-                  ? "bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-xs"
-                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900"
-              }`}
-            >
-              <Camera className="w-3.5 h-3.5 inline mr-1.5" />
-              Live Camera
-            </button>
+          {/* Capture Mode Tabs & Alignment Guide Controls */}
+          <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+            <div className="flex items-center gap-1.5 p-1 bg-slate-100 dark:bg-slate-800 rounded-xl w-fit">
+              <button
+                onClick={() => {
+                  setActiveTab("upload");
+                }}
+                className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition ${
+                  activeTab === "upload"
+                    ? "bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-xs"
+                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900"
+                }`}
+              >
+                <UploadCloud className="w-3.5 h-3.5 inline mr-1.5" />
+                Upload Image / PDF
+              </button>
+              <button
+                onClick={() => {
+                  setActiveTab("camera");
+                  setCapturedImage(null);
+                }}
+                className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition ${
+                  activeTab === "camera"
+                    ? "bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-xs"
+                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900"
+                }`}
+              >
+                <Camera className="w-3.5 h-3.5 inline mr-1.5" />
+                Live Camera
+              </button>
+            </div>
+
+            {/* Guide Grid Controls */}
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setShowGuideGrid((prev) => !prev)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition border ${
+                  showGuideGrid
+                    ? "bg-cyan-50 dark:bg-cyan-950/60 text-cyan-700 dark:text-cyan-300 border-cyan-300 dark:border-cyan-800 shadow-xs"
+                    : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700 hover:text-slate-900"
+                }`}
+                title="Toggle visual alignment guidelines"
+              >
+                <Grid className="w-3.5 h-3.5 text-cyan-500" />
+                <span>Guide Grid: {showGuideGrid ? "ON" : "OFF"}</span>
+              </button>
+              {showGuideGrid && (
+                <select
+                  value={gridMode}
+                  onChange={(e) => setGridMode(e.target.value as any)}
+                  className="px-2.5 py-1.5 rounded-xl text-xs font-semibold bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 focus:outline-none"
+                >
+                  <option value="exam-4col">4 Subject Columns (1–40)</option>
+                  <option value="rule-of-thirds">3×3 Framing Grid</option>
+                </select>
+              )}
+            </div>
           </div>
 
           {/* Viewport Area */}
@@ -295,20 +330,12 @@ export const Step3ScanSheet: React.FC<Step3ScanSheetProps> = ({
                   muted
                   className="w-full h-full object-contain"
                 />
-                {/* Visual Alignment Guide Frame */}
-                <div className="absolute inset-8 sm:inset-12 border-2 border-dashed border-blue-400/80 rounded-xl pointer-events-none flex flex-col justify-between p-4">
-                  <span className="text-[11px] font-medium text-blue-300 bg-blue-950/70 px-2 py-0.5 rounded w-fit">
-                    Align sheet boundaries inside frame
-                  </span>
-                  <div className="w-full flex justify-center">
-                    <span className="text-[11px] text-white/80 bg-black/60 px-3 py-1 rounded-full backdrop-blur-xs">
-                      Ensure good lighting &amp; clear shaded boxes
-                    </span>
-                  </div>
-                </div>
+                
+                {/* Visual Alignment Guide Frame with 4-Column Grid */}
+                {showGuideGrid && <ScanGuideGrid mode={gridMode} opacity={0.9} />}
 
                 {/* Camera Buttons Floating */}
-                <div className="absolute bottom-4 inset-x-0 flex items-center justify-center gap-3">
+                <div className="absolute bottom-4 inset-x-0 flex items-center justify-center gap-3 z-20">
                   <button
                     onClick={() =>
                       setCameraFacing((prev) =>
@@ -338,7 +365,11 @@ export const Step3ScanSheet: React.FC<Step3ScanSheetProps> = ({
                   style={{ transform: `rotate(${rotation}deg)` }}
                   className="max-h-[460px] w-auto object-contain transition-transform duration-200 rounded"
                 />
-                <div className="absolute top-3 right-3 flex items-center gap-2">
+                
+                {/* Guide Grid Overlay on Preview */}
+                {showGuideGrid && <ScanGuideGrid mode={gridMode} opacity={0.7} />}
+
+                <div className="absolute top-3 right-3 flex items-center gap-2 z-20">
                   <button
                     onClick={handleRotate}
                     className="p-2 rounded-lg bg-black/70 text-white hover:bg-black transition backdrop-blur-xs text-xs font-semibold flex items-center gap-1.5"
