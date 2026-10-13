@@ -15,6 +15,7 @@ import {
   SwitchCamera
 } from "lucide-react";
 import { AnswerKeyData, GradingResult, GradingRules } from "@/types/grading";
+import { processImageClientSide } from "@/utils/clientOmr";
 
 interface Step3ScanSheetProps {
   answerKey: AnswerKeyData;
@@ -139,7 +140,11 @@ export const Step3ScanSheet: React.FC<Step3ScanSheetProps> = ({
     setIsProcessing(true);
     setErrorMsg(null);
     try {
-      const res = await fetch("/api/sample/student-sheet");
+      // First try local static file
+      let res = await fetch("/sample_answer_sheet.png");
+      if (!res.ok) {
+        res = await fetch("/api/sample/student-sheet");
+      }
       if (!res.ok) {
         throw new Error("Could not load sample student paper.");
       }
@@ -166,6 +171,7 @@ export const Step3ScanSheet: React.FC<Step3ScanSheetProps> = ({
     setIsProcessing(true);
     setErrorMsg(null);
 
+    // 1. Try Python FastAPI grading engine
     try {
       const formData = new FormData();
       formData.append("file", imageFile);
@@ -181,20 +187,28 @@ export const Step3ScanSheet: React.FC<Step3ScanSheetProps> = ({
         body: formData,
       });
 
-      if (!res.ok) {
-        if (res.status === 404 || res.status === 502 || res.status === 503) {
-          throw new Error(
-            "Backend grading engine is offline or unreachable on port 8001. Please run 'run_backend.bat' locally (or verify NEXT_PUBLIC_BACKEND_URL in Vercel)."
-          );
-        }
-        const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.detail || `Grading failed (${res.status})`);
+      if (res.ok) {
+        const gradingResult: GradingResult = await res.json();
+        onGraded(gradingResult);
+        setIsProcessing(false);
+        return;
       }
+    } catch (err) {
+      // Python backend offline, fall through to client OMR engine
+      console.warn("FastAPI engine unavailable, running client-side OMR:", err);
+    }
 
-      const gradingResult: GradingResult = await res.json();
-      onGraded(gradingResult);
-    } catch (err: any) {
-      setErrorMsg(err.message || "OMR grading failed. Please verify paper alignment.");
+    // 2. Seamless Client-Side Browser OMR Fallback
+    try {
+      const clientResult = await processImageClientSide(
+        imageFile,
+        answerKey,
+        studentName,
+        controlNumber
+      );
+      onGraded(clientResult);
+    } catch (clientErr: any) {
+      setErrorMsg(clientErr.message || "OMR grading failed. Please verify paper alignment.");
     } finally {
       setIsProcessing(false);
     }
