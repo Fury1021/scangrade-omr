@@ -353,7 +353,7 @@ class OMREngine:
                 status = "ambiguous"
                 confidence = 0.40
                 needs_review = True
-            elif top_fill >= fill_thresh or (top_fill >= 0.25 and (top_fill - second_fill >= 0.05)):
+            elif top_fill >= fill_thresh or (top_fill >= 0.20 and (top_fill - second_fill >= 0.08)):
                 # Single clear mark
                 student_answer = sorted_by_fill[0].id
                 confidence = min(1.0, 0.70 + (top_fill - second_fill) * 0.5)

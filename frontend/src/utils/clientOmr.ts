@@ -248,7 +248,7 @@ export async function processImageClientSide(
         status = "ambiguous";
         confidence = 0.40;
         needsReview = true;
-      } else if (topFill >= fillThresh || (topFill >= 0.25 && (topFill - secondFill >= 0.05))) {
+      } else if (topFill >= fillThresh || (topFill >= 0.20 && (topFill - secondFill >= 0.08))) {
         studentAnswer = choices[0].id;
         confidence = Math.min(1.0, 0.70 + (topFill - secondFill) * 0.5);
 
