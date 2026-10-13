@@ -149,6 +149,23 @@ class OMREngine:
         # If image is landscape (W > H), answer sheets are strictly portrait.
         # Test rotating 90° CCW vs 90° CW to determine which is upright.
         if W > H:
+            # Check if sheet or dynamic grid is already valid in current orientation
+            g_orig, _ = self.detect_dynamic_grid(img)
+            if g_orig is not None:
+                return img
+
+            # Check if paper inside landscape image is already portrait
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if len(img.shape) == 3 else img
+            blur = cv2.GaussianBlur(gray, (7, 7), 0)
+            _, p_thresh = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+            p_cnts, _ = cv2.findContours(p_thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            if p_cnts:
+                best_pc = max(p_cnts, key=cv2.contourArea)
+                if cv2.contourArea(best_pc) > (W * H * 0.15):
+                    _, _, pw, ph = cv2.boundingRect(best_pc)
+                    if ph > pw * 1.05:
+                        return img
+
             cand_ccw = cv2.rotate(img, cv2.ROTATE_90_COUNTERCLOCKWISE)
             cand_cw = cv2.rotate(img, cv2.ROTATE_90_CLOCKWISE)
             
@@ -440,6 +457,26 @@ class OMREngine:
                 paper_corners = approx.reshape(4, 2) / scale
                 break
                 
+        if paper_corners is None:
+            # Otsu paper threshold fallback for images with desk/table margins
+            _, thresh_paper = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+            p_contours, _ = cv2.findContours(thresh_paper, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            p_contours = sorted(p_contours, key=cv2.contourArea, reverse=True)
+            for pc in p_contours[:3]:
+                if cv2.contourArea(pc) > (resized.shape[0] * resized.shape[1] * 0.15):
+                    peri = cv2.arcLength(pc, True)
+                    approx = cv2.approxPolyDP(pc, 0.03 * peri, True)
+                    if len(approx) == 4:
+                        paper_corners = approx.reshape(4, 2) / scale
+                        break
+                    else:
+                        x, y, w, h = cv2.boundingRect(pc)
+                        if w > resized.shape[1] * 0.20 and h > resized.shape[0] * 0.20:
+                            paper_corners = np.array([
+                                [x, y], [x + w, y], [x + w, y + h], [x, y + h]
+                            ], dtype=np.float32) / scale
+                            break
+
         if paper_corners is not None:
             # Order corners: top-left, top-right, bottom-right, bottom-left
             ordered_corners = self._order_points(paper_corners)

@@ -74,6 +74,39 @@ export async function processImageClientSide(
     effectiveRotation = 90;
   }
 
+  // 1. Render oriented image on an intermediate canvas
+  const effW = effectiveRotation === 90 || effectiveRotation === 270 ? origH : origW;
+  const effH = effectiveRotation === 90 || effectiveRotation === 270 ? origW : origH;
+  const orientCanvas = document.createElement("canvas");
+  orientCanvas.width = effW;
+  orientCanvas.height = effH;
+  const oCtx = orientCanvas.getContext("2d", { willReadFrequently: true });
+  if (!oCtx) {
+    throw new Error("Could not initialize oriented canvas context");
+  }
+
+  oCtx.save();
+  if (effectiveRotation === 90) {
+    oCtx.translate(effW, 0);
+    oCtx.rotate((90 * Math.PI) / 180);
+    oCtx.drawImage(img, 0, 0, effH, effW);
+  } else if (effectiveRotation === 180) {
+    oCtx.translate(effW, effH);
+    oCtx.rotate(Math.PI);
+    oCtx.drawImage(img, 0, 0, effW, effH);
+  } else if (effectiveRotation === 270) {
+    oCtx.translate(0, effH);
+    oCtx.rotate((270 * Math.PI) / 180);
+    oCtx.drawImage(img, 0, 0, effH, effW);
+  } else {
+    oCtx.drawImage(img, 0, 0, effW, effH);
+  }
+  oCtx.restore();
+
+  // 2. Automatically detect paper boundary to isolate paper from surrounding table/desk/UI margins
+  const { cropX, cropY, cropW, cropH } = detectPaperCrop(oCtx, effW, effH);
+
+  // 3. Draw ONLY the cropped paper onto the portrait canonical canvas
   const canvas = document.createElement("canvas");
   const targetWidth = 2000;
   const targetHeight = Math.round(targetWidth * (PAGE_HEIGHT_PT / PAGE_WIDTH_PT)); // ~3058
@@ -85,24 +118,7 @@ export async function processImageClientSide(
     throw new Error("Could not initialize 2D canvas context");
   }
 
-  // Draw scaled and rotated image onto portrait canonical canvas
-  ctx.save();
-  if (effectiveRotation === 90) {
-    ctx.translate(targetWidth, 0);
-    ctx.rotate((90 * Math.PI) / 180);
-    ctx.drawImage(img, 0, 0, targetHeight, targetWidth);
-  } else if (effectiveRotation === 180) {
-    ctx.translate(targetWidth, targetHeight);
-    ctx.rotate(Math.PI);
-    ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
-  } else if (effectiveRotation === 270) {
-    ctx.translate(0, targetHeight);
-    ctx.rotate((270 * Math.PI) / 180);
-    ctx.drawImage(img, 0, 0, targetHeight, targetWidth);
-  } else {
-    ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
-  }
-  ctx.restore();
+  ctx.drawImage(orientCanvas, cropX, cropY, cropW, cropH, 0, 0, targetWidth, targetHeight);
 
   // Extract pixel data for grayscale analysis
   const imageData = ctx.getImageData(0, 0, targetWidth, targetHeight);
@@ -403,4 +419,109 @@ function drawQuestionOverlay(
       ctx.strokeRect(x - 2, y - 2, w + 4, h + 4);
     }
   }
+}
+
+/**
+ * Automatically detects the bounding box of the paper within an image to remove
+ * desk/table/background margins captured by phone cameras, webcams, or screenshots.
+ */
+function detectPaperCrop(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  h: number
+): { cropX: number; cropY: number; cropW: number; cropH: number } {
+  const analysisScale = 360 / Math.max(w, h);
+  const sW = Math.max(10, Math.round(w * analysisScale));
+  const sH = Math.max(10, Math.round(h * analysisScale));
+
+  const smallCanvas = document.createElement("canvas");
+  smallCanvas.width = sW;
+  smallCanvas.height = sH;
+  const sCtx = smallCanvas.getContext("2d", { willReadFrequently: true });
+  if (!sCtx) return { cropX: 0, cropY: 0, cropW: w, cropH: h };
+
+  sCtx.drawImage(ctx.canvas, 0, 0, sW, sH);
+  const imgData = sCtx.getImageData(0, 0, sW, sH).data;
+  const lums = new Uint8Array(sW * sH);
+  for (let i = 0; i < lums.length; i++) {
+    lums[i] = Math.round(
+      0.299 * imgData[i * 4] + 0.587 * imgData[i * 4 + 1] + 0.114 * imgData[i * 4 + 2]
+    );
+  }
+
+  // Sample borders (top, bottom, left, right edges)
+  const borderVals: number[] = [];
+  for (let x = 0; x < sW; x += 4) {
+    borderVals.push(lums[x]);
+    borderVals.push(lums[(sH - 1) * sW + x]);
+  }
+  for (let y = 0; y < sH; y += 4) {
+    borderVals.push(lums[y * sW]);
+    borderVals.push(lums[y * sW + (sW - 1)]);
+  }
+  borderVals.sort((a, b) => a - b);
+  const medBorder = borderVals[Math.floor(borderVals.length / 2)] || 240;
+
+  // If the border is already bright white paper (e.g. PDF render or full-bleed crop), do not crop
+  if (medBorder > 185) {
+    return { cropX: 0, cropY: 0, cropW: w, cropH: h };
+  }
+
+  // Sample interior pixels
+  const centerVals: number[] = [];
+  const y0 = Math.floor(sH * 0.25);
+  const y1 = Math.floor(sH * 0.75);
+  const x0 = Math.floor(sW * 0.25);
+  const x1 = Math.floor(sW * 0.75);
+  for (let y = y0; y < y1; y += 4) {
+    for (let x = x0; x < x1; x += 4) {
+      centerVals.push(lums[y * sW + x]);
+    }
+  }
+  centerVals.sort((a, b) => a - b);
+  const medCenter = centerVals[Math.floor(centerVals.length * 0.5)] || 240;
+
+  // If center paper is brighter than surrounding desk / dark background
+  if (medCenter > medBorder + 25) {
+    const threshVal = (medBorder + medCenter) / 2.0;
+    let minRow = sH;
+    let maxRow = 0;
+    let minCol = sW;
+    let maxCol = 0;
+
+    for (let y = 0; y < sH; y++) {
+      let count = 0;
+      for (let x = 0; x < sW; x++) {
+        if (lums[y * sW + x] > threshVal) count++;
+      }
+      if (count > sW * 0.15) {
+        if (y < minRow) minRow = y;
+        if (y > maxRow) maxRow = y;
+      }
+    }
+
+    for (let x = 0; x < sW; x++) {
+      let count = 0;
+      for (let y = 0; y < sH; y++) {
+        if (lums[y * sW + x] > threshVal) count++;
+      }
+      if (count > sH * 0.15) {
+        if (x < minCol) minCol = x;
+        if (x > maxCol) maxCol = x;
+      }
+    }
+
+    if (maxCol > minCol && maxRow > minRow) {
+      const cropX = Math.round(minCol / analysisScale);
+      const cropY = Math.round(minRow / analysisScale);
+      const cropW = Math.round((maxCol - minCol) / analysisScale);
+      const cropH = Math.round((maxRow - minRow) / analysisScale);
+
+      if (cropW > w * 0.20 && cropH > h * 0.20) {
+        return { cropX, cropY, cropW, cropH };
+      }
+    }
+  }
+
+  return { cropX: 0, cropY: 0, cropW: w, cropH: h };
 }
