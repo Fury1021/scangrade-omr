@@ -19,7 +19,7 @@ def test_extract_aiscc_sample_pdf():
     assert result.total_questions == 160
     assert len(result.sections) == 4
     assert "General Information" in result.sections
-    assert "Logical Reasoning" in result.sections
+    assert "Logical Information" in result.sections
     assert "Mathematics" in result.sections
     assert "English" in result.sections
     

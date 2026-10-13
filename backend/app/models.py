@@ -9,6 +9,7 @@ class ChoiceOption(BaseModel):
 
 class QuestionAnswer(BaseModel):
     question_number: int
+    local_question_number: int = 1  # 1 to 40 for AISCC exam columns
     section: Optional[str] = "General"
     correct_answer: str = ""  # e.g. "A", "B", or "A/B" for multi-key
     student_answer: Optional[str] = None  # e.g. "A", "BLANK", "A,B" (multiple)

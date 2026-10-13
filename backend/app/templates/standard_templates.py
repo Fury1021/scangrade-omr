@@ -9,7 +9,7 @@ AVAILABLE_TEMPLATES = {
     "aiscc_160": {
         "id": "aiscc_160",
         "name": "CAAP AISCC Qualifying Exam (160 Questions)",
-        "description": "Official 4-column layout for CAAP AISCC Batch Qualifying Examination. 40 questions x 4 sections (General Information, Logical Reasoning, Mathematics, English).",
+        "description": "Official 4-column layout for CAAP AISCC Batch Qualifying Examination. 40 questions x 4 sections (General Information, Logical Information, Mathematics, English).",
         "total_questions": 160,
         "sections": AISCC_SECTIONS,
         "choices": ["A", "B", "C", "D"],

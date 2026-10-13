@@ -7,6 +7,7 @@ export interface ChoiceOption {
 
 export interface QuestionAnswer {
   question_number: number;
+  local_question_number?: number;
   section: string;
   correct_answer: string;
   student_answer: string | null;

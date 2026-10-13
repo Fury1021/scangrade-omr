@@ -13,7 +13,7 @@ const COLUMNS_CONFIG = [
     box_size_pt: 12.0,
   },
   {
-    name: "Logical Reasoning",
+    name: "Logical Information",
     section_index: 1,
     q_num_x: 169.8,
     choices_x: { A: 195.4, B: 218.3, C: 241.1, D: 264.0 },
@@ -228,6 +228,7 @@ export async function processImageClientSide(
 
       const qAnswer: QuestionAnswer = {
         question_number: globalQNum,
+        local_question_number: qIdx,
         section: secName,
         correct_answer: correctKey,
         student_answer: studentAnswer,

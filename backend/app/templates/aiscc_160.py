@@ -4,7 +4,7 @@ Template definition for CAAP AISCC Qualifying Examination Answer Sheet
 Page Size: 612 x 936 pt (US Folio/Legal)
 160 Questions total, divided into 4 subjects of 40 questions each:
 1. General Information (Q1 - Q40)
-2. Logical Reasoning (Q1 - Q40)
+2. Logical Information (Q1 - Q40)
 3. Mathematics (Q1 - Q40)
 4. English (Q1 - Q40)
 """
@@ -16,7 +16,7 @@ PAGE_HEIGHT_PT = 936.0
 
 SECTIONS = [
     "General Information",
-    "Logical Reasoning",
+    "Logical Information",
     "Mathematics",
     "English"
 ]
@@ -36,7 +36,7 @@ COLUMNS_CONFIG = [
         "box_size_pt": 12.0
     },
     {
-        "name": "Logical Reasoning",
+        "name": "Logical Information",
         "section_index": 1,
         "q_num_x": 169.8,
         "choices_x": {

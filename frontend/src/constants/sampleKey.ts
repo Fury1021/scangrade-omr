@@ -6,7 +6,7 @@ export const SAMPLE_AISCC_KEY: AnswerKeyData = {
   total_questions: 160,
   sections: [
     "General Information",
-    "Logical Reasoning",
+    "Logical Information",
     "Mathematics",
     "English"
   ],
@@ -30,7 +30,7 @@ export const SAMPLE_AISCC_KEY: AnswerKeyData = {
   },
   section_mapping: {
     ...Object.fromEntries(Array.from({ length: 40 }, (_, i) => [(i + 1).toString(), "General Information"])),
-    ...Object.fromEntries(Array.from({ length: 40 }, (_, i) => [(i + 41).toString(), "Logical Reasoning"])),
+    ...Object.fromEntries(Array.from({ length: 40 }, (_, i) => [(i + 41).toString(), "Logical Information"])),
     ...Object.fromEntries(Array.from({ length: 40 }, (_, i) => [(i + 81).toString(), "Mathematics"])),
     ...Object.fromEntries(Array.from({ length: 40 }, (_, i) => [(i + 121).toString(), "English"]))
   },

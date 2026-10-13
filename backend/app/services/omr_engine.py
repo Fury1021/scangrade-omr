@@ -325,8 +325,10 @@ class OMREngine:
                 points = self.rules.points_per_correct
                 needs_review = False
                 
+            local_q_num = q_item.get("local_question_number", ((q_num - 1) % 40) + 1)
             q_res = QuestionAnswer(
                 question_number=q_num,
+                local_question_number=local_q_num,
                 section=sec_name,
                 correct_answer=correct_key,
                 student_answer=student_answer,

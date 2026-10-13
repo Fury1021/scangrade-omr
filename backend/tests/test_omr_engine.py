@@ -38,7 +38,7 @@ def test_omr_engine_mark_classification_and_multiple_marks():
     key = AnswerKeyData(
         title="Test Synthetic Key",
         total_questions=160,
-        sections=["General Information", "Logical Reasoning", "Mathematics", "English"],
+        sections=["General Information", "Logical Information", "Mathematics", "English"],
         answers={
             "1": "B",
             "2": "A",
@@ -83,7 +83,7 @@ def test_omr_engine_rotation():
     key = AnswerKeyData(
         title="Test Key",
         total_questions=160,
-        sections=["General Information", "Logical Reasoning", "Mathematics", "English"],
+        sections=["General Information", "Logical Information", "Mathematics", "English"],
         answers={"1": "B"}
     )
     
@@ -98,6 +98,45 @@ def test_omr_engine_rotation():
         )
         assert len(questions) == 160
         assert annotated_url is not None
+
+def test_four_columns_local_item_numbers():
+    img_bytes = create_synthetic_sheet()
+    key = AnswerKeyData(
+        title="4-Column Key",
+        total_questions=160,
+        sections=["General Information", "Logical Information", "Mathematics", "English"],
+        answers={"1": "B", "41": "A", "81": "C", "121": "D"}
+    )
+    engine = OMREngine()
+    questions, _, _, _ = engine.process_image(
+        image_bytes=img_bytes,
+        answer_key=key,
+        auto_align=False
+    )
+    assert len(questions) == 160
+    # Column 1: General Information (Items 1 - 40)
+    assert questions[0].section == "General Information"
+    assert questions[0].local_question_number == 1
+    assert questions[39].section == "General Information"
+    assert questions[39].local_question_number == 40
+    
+    # Column 2: Logical Information (Items 1 - 40)
+    assert questions[40].section == "Logical Information"
+    assert questions[40].local_question_number == 1
+    assert questions[79].section == "Logical Information"
+    assert questions[79].local_question_number == 40
+    
+    # Column 3: Mathematics (Items 1 - 40)
+    assert questions[80].section == "Mathematics"
+    assert questions[80].local_question_number == 1
+    assert questions[119].section == "Mathematics"
+    assert questions[119].local_question_number == 40
+    
+    # Column 4: English (Items 1 - 40)
+    assert questions[120].section == "English"
+    assert questions[120].local_question_number == 1
+    assert questions[159].section == "English"
+    assert questions[159].local_question_number == 40
 
 def test_omr_engine_dynamic_grid_cropped_sheet():
     """Verifies that OMREngine dynamically aligns and accurately grades cropped sheets with no headers."""

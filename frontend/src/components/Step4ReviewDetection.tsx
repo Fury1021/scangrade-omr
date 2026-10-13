@@ -125,19 +125,21 @@ export const Step4ReviewDetection: React.FC<Step4ReviewDetectionProps> = ({
 
           {/* List of uncertain questions */}
           <div className="space-y-3">
-            {uncertainQuestions.map((q) => (
+            {uncertainQuestions.map((q) => {
+              const localNum = q.local_question_number ?? (((q.question_number - 1) % 40) + 1);
+              return (
               <div
                 key={q.question_number}
                 className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-amber-300 dark:border-amber-800/60 shadow-xs"
               >
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
                   <div className="flex items-center gap-2">
-                    <span className="w-8 h-8 rounded-lg bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-400 font-extrabold text-sm flex items-center justify-center">
-                      Q{q.question_number}
+                    <span className="w-10 h-8 rounded-lg bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-400 font-extrabold text-xs flex items-center justify-center">
+                      #{localNum}
                     </span>
                     <div>
                       <h4 className="text-sm font-bold text-slate-900 dark:text-white">
-                        {q.section} • Question #{q.question_number}
+                        {q.section} • Item #{localNum} <span className="text-xs font-normal text-slate-400">(Q{q.question_number})</span>
                       </h4>
                       <p className="text-xs text-slate-500 dark:text-slate-400">
                         Correct Answer: <strong className="text-slate-700 dark:text-slate-200">{q.correct_answer}</strong> • Detected:{" "}
@@ -198,7 +200,8 @@ export const Step4ReviewDetection: React.FC<Step4ReviewDetectionProps> = ({
                   </button>
                 </div>
               </div>
-            ))}
+            );
+          })}
           </div>
         </div>
       )}

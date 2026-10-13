@@ -33,7 +33,7 @@ def test_api_scan_and_grade_synthetic():
     answer_key_dict = {
         "title": "API Test Key",
         "total_questions": 160,
-        "sections": ["General Information", "Logical Reasoning", "Mathematics", "English"],
+        "sections": ["General Information", "Logical Information", "Mathematics", "English"],
         "answers": {"1": "B", "2": "A", "3": "C", "4": "D"},
         "section_mapping": {"1": "General Information", "2": "General Information"},
         "choices_per_question": 4,

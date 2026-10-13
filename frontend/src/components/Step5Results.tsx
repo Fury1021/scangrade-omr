@@ -141,11 +141,13 @@ export const Step5Results: React.FC<Step5ResultsProps> = ({
 
   // Filter questions list
   const filteredQuestions = result.questions.filter((q) => {
+    const localNum = q.local_question_number ?? (((q.question_number - 1) % 40) + 1);
     const matchesStatus = filterStatus === "ALL" || q.status === filterStatus;
     const matchesSection = filterSection === "ALL" || q.section === filterSection;
     const matchesSearch =
       searchQuery === "" ||
-      q.question_number.toString().includes(searchQuery) ||
+      q.question_number.toString() === searchQuery ||
+      localNum.toString() === searchQuery ||
       (q.section && q.section.toLowerCase().includes(searchQuery.toLowerCase()));
     return matchesStatus && matchesSection && matchesSearch;
   });
@@ -345,45 +347,75 @@ export const Step5Results: React.FC<Step5ResultsProps> = ({
 
       {/* Question by Question Detailed Table */}
       <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 shadow-xs">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4">
-          <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
-            <Layers className="w-4 h-4 text-blue-600 dark:text-blue-400" />
-            Item-by-Item Grading Breakdown ({filteredQuestions.length})
-          </h3>
+        <div className="flex flex-col gap-4 mb-4">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+              <Layers className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+              Item-by-Item Grading Breakdown ({filteredQuestions.length})
+            </h3>
 
-          {/* Filters */}
-          <div className="flex flex-wrap items-center gap-2">
-            {/* Status Filter */}
-            <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl text-xs">
-              {[
-                { id: "ALL", label: "All" },
-                { id: "correct", label: "Correct" },
-                { id: "incorrect", label: "Incorrect" },
-                { id: "unanswered", label: "Blank" },
-                { id: "ambiguous", label: "Review" },
-              ].map((tab) => (
-                <button
-                  key={tab.id}
-                  onClick={() => setFilterStatus(tab.id)}
-                  className={`px-2.5 py-1 rounded-lg font-semibold transition ${
-                    filterStatus === tab.id
-                      ? "bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-xs"
-                      : "text-slate-600 dark:text-slate-400 hover:text-slate-900"
-                  }`}
-                >
-                  {tab.label}
-                </button>
-              ))}
+            {/* Filters */}
+            <div className="flex flex-wrap items-center gap-2">
+              {/* Status Filter */}
+              <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl text-xs">
+                {[
+                  { id: "ALL", label: "All" },
+                  { id: "correct", label: "Correct" },
+                  { id: "incorrect", label: "Incorrect" },
+                  { id: "unanswered", label: "Blank" },
+                  { id: "ambiguous", label: "Review" },
+                ].map((tab) => (
+                  <button
+                    key={tab.id}
+                    onClick={() => setFilterStatus(tab.id)}
+                    className={`px-2.5 py-1 rounded-lg font-semibold transition ${
+                      filterStatus === tab.id
+                        ? "bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-xs"
+                        : "text-slate-600 dark:text-slate-400 hover:text-slate-900"
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Search */}
+              <input
+                type="text"
+                placeholder="Search Item # or Q#..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="px-3 py-1.5 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white w-36 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
             </div>
+          </div>
 
-            {/* Search */}
-            <input
-              type="text"
-              placeholder="Search Q#..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="px-3 py-1.5 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white w-28 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
+          {/* Section Filter Pills */}
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar text-xs">
+            <span className="text-[11px] font-semibold text-slate-400 mr-1 shrink-0">Subject:</span>
+            <button
+              onClick={() => setFilterSection("ALL")}
+              className={`px-2.5 py-1 rounded-lg font-semibold whitespace-nowrap transition ${
+                filterSection === "ALL"
+                  ? "bg-blue-600 text-white shadow-xs"
+                  : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-900"
+              }`}
+            >
+              All 4 Columns (160)
+            </button>
+            {result.sections.map((s) => (
+              <button
+                key={s.section_name}
+                onClick={() => setFilterSection(s.section_name)}
+                className={`px-2.5 py-1 rounded-lg font-semibold whitespace-nowrap transition ${
+                  filterSection === s.section_name
+                    ? "bg-blue-600 text-white shadow-xs"
+                    : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-900"
+                }`}
+              >
+                {s.section_name} (1–40)
+              </button>
+            ))}
           </div>
         </div>
 
@@ -392,7 +424,7 @@ export const Step5Results: React.FC<Step5ResultsProps> = ({
           <table className="w-full text-left text-xs">
             <thead className="bg-slate-50 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 uppercase font-bold text-[10px] tracking-wider">
               <tr>
-                <th className="py-2.5 px-3">Item #</th>
+                <th className="py-2.5 px-3">Item # (1–40)</th>
                 <th className="py-2.5 px-3">Section</th>
                 <th className="py-2.5 px-3 text-center">Answer Key</th>
                 <th className="py-2.5 px-3 text-center">Student Answer</th>
@@ -404,6 +436,7 @@ export const Step5Results: React.FC<Step5ResultsProps> = ({
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60">
               {filteredQuestions.map((q) => {
+                const localNum = q.local_question_number ?? (((q.question_number - 1) % 40) + 1);
                 const isCorrect = q.status === "correct";
                 const isIncorrect = q.status === "incorrect";
                 const isUnanswered = q.status === "unanswered";
@@ -414,8 +447,15 @@ export const Step5Results: React.FC<Step5ResultsProps> = ({
                     key={q.question_number}
                     className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition"
                   >
-                    <td className="py-2.5 px-3 font-bold text-slate-900 dark:text-white">
-                      Q{q.question_number}
+                    <td className="py-2.5 px-3">
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-extrabold text-slate-900 dark:text-white">
+                          Item #{localNum}
+                        </span>
+                        <span className="text-[10px] text-slate-400">
+                          (Q{q.question_number})
+                        </span>
+                      </div>
                     </td>
                     <td className="py-2.5 px-3 text-slate-500 dark:text-slate-400">
                       {q.section}

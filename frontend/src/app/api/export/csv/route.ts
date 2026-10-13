@@ -23,10 +23,11 @@ export async function POST(req: NextRequest) {
       csvContent += `"${s.section_name}",${s.score},${s.max_score},${s.percentage}%,${s.correct_count},${s.incorrect_count},${s.unanswered_count}\n`;
     }
 
-    csvContent += "\n--- Question-by-Question Details ---\n";
-    csvContent += "Question #,Section,Correct Answer,Student Answer,Result,Score,Confidence,Notes\n";
+    csvContent += "\n--- Question-by-Question Details (4 Columns, Items 1-40) ---\n";
+    csvContent += "Section,Item # (1-40),Global # (1-160),Correct Answer,Student Answer,Result,Score,Confidence,Notes\n";
     for (const q of result.questions) {
-      csvContent += `${q.question_number},"${q.section}","${q.correct_answer}","${q.student_answer || "BLANK"}",${q.status.toUpperCase()},${q.points_awarded},${Math.round(q.confidence * 100)}%,"${q.notes || ""}"\n`;
+      const localNum = q.local_question_number ?? (((q.question_number - 1) % 40) + 1);
+      csvContent += `"${q.section}",${localNum},${q.question_number},"${q.correct_answer}","${q.student_answer || "BLANK"}",${q.status.toUpperCase()},${q.points_awarded},${Math.round(q.confidence * 100)}%,"${q.notes || ""}"\n`;
     }
 
     return new NextResponse(csvContent, {

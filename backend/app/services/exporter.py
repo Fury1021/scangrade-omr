@@ -56,12 +56,14 @@ def generate_csv_report(result: GradingResult) -> str:
     writer.writerow([])
     
     # Question by Question Table
-    writer.writerow(["--- Question-by-Question Details ---"])
-    writer.writerow(["Question #", "Section", "Correct Answer", "Student Answer", "Result", "Score", "Confidence", "Notes"])
+    writer.writerow(["--- Question-by-Question Details (4 Columns, Items 1-40) ---"])
+    writer.writerow(["Section", "Item # (1-40)", "Global # (1-160)", "Correct Answer", "Student Answer", "Result", "Score", "Confidence", "Notes"])
     for q in result.questions:
+        local_num = getattr(q, 'local_question_number', ((q.question_number - 1) % 40) + 1)
         writer.writerow([
-            q.question_number,
             q.section,
+            local_num,
+            q.question_number,
             q.correct_answer,
             q.student_answer or "BLANK",
             q.status.upper(),
@@ -181,14 +183,18 @@ def generate_pdf_report(result: GradingResult) -> bytes:
     story.append(sec_table)
     story.append(Spacer(1, 16))
     
-    # Question Grid Summary (Compact 4-column table for 160 questions)
-    story.append(Paragraph("<b>Question Item Summary</b>", section_h2))
+    # Question Grid Summary (Compact 4-column table for 160 questions, 1-40 items each)
+    story.append(Paragraph("<b>4-Column Examination Breakdown (Items 1 – 40 per subject)</b>", section_h2))
     
-    # Format questions into a 4-column compact layout
-    # Each sub-column: Q# | Key | Student | Res
-    q_data = [["Q", "Key", "Ans", "Res", "Q", "Key", "Ans", "Res", "Q", "Key", "Ans", "Res", "Q", "Key", "Ans", "Res"]]
+    header_row_1 = [
+        "General Info (1-40)", "", "", "",
+        "Logical Info (1-40)", "", "", "",
+        "Mathematics (1-40)", "", "", "",
+        "English (1-40)", "", "", ""
+    ]
+    header_row_2 = ["#", "Key", "Ans", "Res", "#", "Key", "Ans", "Res", "#", "Key", "Ans", "Res", "#", "Key", "Ans", "Res"]
+    q_data = [header_row_1, header_row_2]
     
-    # Divide 160 questions into 4 groups of 40 (corresponding to the 4 columns)
     num_q = len(result.questions)
     per_col = 40 if num_q == 160 else (num_q // 4 if num_q >= 4 else num_q)
     
@@ -198,24 +204,33 @@ def generate_pdf_report(result: GradingResult) -> bytes:
             idx = c_idx * per_col + row_idx
             if idx < len(result.questions):
                 q = result.questions[idx]
+                local_num = getattr(q, 'local_question_number', ((q.question_number - 1) % 40) + 1)
                 res_symbol = "✓" if q.status == "correct" else ("✗" if q.status == "incorrect" else ("—" if q.status == "unanswered" else "?"))
                 ans_display = q.student_answer if q.student_answer != "BLANK" else "—"
-                row_items.extend([str(q.question_number), q.correct_answer, ans_display, res_symbol])
+                row_items.extend([str(local_num), q.correct_answer, ans_display, res_symbol])
             else:
                 row_items.extend(["", "", "", ""])
         q_data.append(row_items)
         
     q_table = Table(q_data, colWidths=[20, 24, 24, 20] * 4)
     q_table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#0f172a')),
+        ('SPAN', (0, 0), (3, 0)),
+        ('SPAN', (4, 0), (7, 0)),
+        ('SPAN', (8, 0), (11, 0)),
+        ('SPAN', (12, 0), (15, 0)),
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1e293b')),
         ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
         ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, -1), 6.5),
+        ('FONTSIZE', (0, 0), (-1, 0), 7.0),
+        ('BACKGROUND', (0, 1), (-1, 1), colors.HexColor('#0f172a')),
+        ('TEXTCOLOR', (0, 1), (-1, 1), colors.white),
+        ('FONTNAME', (0, 1), (-1, 1), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 1), (-1, 1), 6.5),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
         ('BOTTOMPADDING', (0, 0), (-1, -1), 1.5),
         ('TOPPADDING', (0, 0), (-1, -1), 1.5),
         ('GRID', (0, 0), (-1, -1), 0.4, colors.HexColor('#e2e8f0')),
-        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f8fafc')])
+        ('ROWBACKGROUNDS', (0, 2), (-1, -1), [colors.white, colors.HexColor('#f8fafc')])
     ]))
     story.append(q_table)
     

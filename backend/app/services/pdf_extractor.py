@@ -153,7 +153,7 @@ def _try_extract_text_key(doc: pymupdf.Document) -> Optional[AnswerKeyData]:
     1. A
     2. B
     3. C
-    Or Table formats.
+    Or 4 sections with 1-40 items each.
     """
     full_text = ""
     for p in doc:
@@ -164,34 +164,81 @@ def _try_extract_text_key(doc: pymupdf.Document) -> Optional[AnswerKeyData]:
     matches = pattern.findall(full_text)
     
     if len(matches) >= 5:
-        # Group by question number
+        q_nums = [int(m[0]) for m in matches]
+        is_multi_section_40 = False
+        
+        # Check if numbers reset or stay <= 40 with many questions
+        if max(q_nums) <= 40 and len(matches) > 40:
+            is_multi_section_40 = True
+        else:
+            resets = sum(1 for i in range(1, len(q_nums)) if q_nums[i] == 1 and q_nums[i-1] >= 20)
+            if resets >= 1:
+                is_multi_section_40 = True
+                
+        if is_multi_section_40:
+            answers = {}
+            section_mapping = {}
+            sec_idx = 0
+            prev_num = 0
+            
+            for q_str, ans in matches:
+                q_num = int(q_str)
+                if q_num < prev_num and (prev_num >= 20 or q_num == 1):
+                    sec_idx = min(3, sec_idx + 1)
+                prev_num = q_num
+                
+                sec_name = AISCC_SECTIONS[sec_idx] if sec_idx < len(AISCC_SECTIONS) else f"Section {sec_idx + 1}"
+                global_q = (sec_idx * 40) + q_num
+                answers[str(global_q)] = ans.upper()
+                section_mapping[str(global_q)] = sec_name
+                
+            for i in range(1, 161):
+                s = str(i)
+                sec_i = (i - 1) // 40
+                if s not in answers:
+                    answers[s] = "BLANK"
+                    section_mapping[s] = AISCC_SECTIONS[sec_i]
+                    
+            return AnswerKeyData(
+                title="AISCC 4-Column Text Answer Key",
+                description="Extracted 4 sections of 1-40 items each (160 Questions total).",
+                total_questions=160,
+                sections=AISCC_SECTIONS,
+                answers=answers,
+                section_mapping=section_mapping,
+                choices_per_question=4,
+                is_verified=True
+            )
+            
         answers = {}
         section_mapping = {}
         for q_str, ans in matches:
             q_num = int(q_str)
             answers[str(q_num)] = ans.upper()
-            section_mapping[str(q_num)] = "General"
+            sec_i = (q_num - 1) // 40
+            sec_name = AISCC_SECTIONS[sec_i] if (0 <= sec_i < 4 and len(matches) > 40) else "General"
+            section_mapping[str(q_num)] = sec_name
             
         total_q = max(int(k) for k in answers.keys())
-        # Fill missing with BLANK
+        sections = AISCC_SECTIONS if (total_q == 160 or len(matches) > 40) else ["General"]
+        
         for i in range(1, total_q + 1):
             s = str(i)
             if s not in answers:
                 answers[s] = "BLANK"
-                section_mapping[s] = "General"
+                sec_i = (i - 1) // 40
+                section_mapping[s] = AISCC_SECTIONS[sec_i] if (0 <= sec_i < 4 and total_q == 160) else "General"
                 
         return AnswerKeyData(
             title="Text-Extracted Answer Key",
             description=f"Extracted {len(matches)} answers from text/tabular formatting.",
             total_questions=total_q,
-            sections=["General"],
+            sections=sections,
             answers=answers,
             section_mapping=section_mapping,
             choices_per_question=4,
             is_verified=True
         )
-        
-    return None
 
 def _try_extract_raster_omr(page: pymupdf.Page) -> Optional[AnswerKeyData]:
     """
