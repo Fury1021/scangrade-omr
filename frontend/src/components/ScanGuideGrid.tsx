@@ -16,9 +16,9 @@ export const ScanGuideGrid: React.FC<ScanGuideGridProps> = ({
   showLabels = true,
 }) => {
   return (
-    <div className="absolute inset-0 pointer-events-none z-10 flex items-center justify-center p-2 sm:p-4 select-none">
+    <div className="absolute inset-0 pointer-events-none z-10 flex items-center justify-center p-3 sm:p-5 pb-20 select-none">
       <div
-        className="h-full max-h-full max-w-full relative flex flex-col justify-between transition-opacity duration-200"
+        className="h-full max-h-[84%] w-auto max-w-[86%] relative flex flex-col justify-between transition-opacity duration-200"
         style={{ aspectRatio: "612 / 936", opacity }}
       >
       {/* Corner Bracket Targets */}

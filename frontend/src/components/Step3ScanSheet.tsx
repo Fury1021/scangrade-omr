@@ -75,8 +75,8 @@ export const Step3ScanSheet: React.FC<Step3ScanSheetProps> = ({
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
           facingMode: cameraFacing,
-          width: { ideal: isPortrait ? 1080 : 1920 },
-          height: { ideal: isPortrait ? 1920 : 1080 },
+          width: { ideal: isPortrait ? 1440 : 1920 },
+          height: { ideal: isPortrait ? 1920 : 1440 },
         },
       });
       mediaStreamRef.current = stream;
@@ -113,33 +113,22 @@ export const Step3ScanSheet: React.FC<Step3ScanSheetProps> = ({
   const snapPhoto = () => {
     if (!videoRef.current) return;
     const video = videoRef.current;
-    const vw = video.videoWidth || 1280;
-    const vh = video.videoHeight || 720;
-    const isPortraitDisplay = typeof window !== "undefined" && window.innerHeight > window.innerWidth;
-    const needRotate = isPortraitDisplay && vw > vh;
+    const vw = video.videoWidth;
+    const vh = video.videoHeight;
+    if (!vw || !vh) return;
 
     const canvas = document.createElement("canvas");
-    if (needRotate) {
-      canvas.width = vh;
-      canvas.height = vw;
-    } else {
-      canvas.width = vw;
-      canvas.height = vh;
-    }
+    canvas.width = vw;
+    canvas.height = vh;
 
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    if (needRotate) {
-      ctx.translate(canvas.width / 2, canvas.height / 2);
-      ctx.rotate((90 * Math.PI) / 180);
-      ctx.drawImage(video, -vw / 2, -vh / 2);
-    } else {
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    }
+    ctx.drawImage(video, 0, 0, vw, vh);
 
     const dataUrl = canvas.toDataURL("image/jpeg", 0.95);
     setCapturedImage(dataUrl);
+    setRotation(0);
 
     // Convert data URL to Blob file
     canvas.toBlob((blob) => {
@@ -344,9 +333,9 @@ export const Step3ScanSheet: React.FC<Step3ScanSheetProps> = ({
           </div>
 
           {/* Viewport Area */}
-          <div className="relative flex-1 min-h-[380px] bg-slate-950 rounded-xl overflow-hidden flex items-center justify-center border border-slate-800">
+          <div className="relative flex-1 min-h-[480px] sm:min-h-[560px] h-[55vh] max-h-[720px] bg-slate-950 rounded-xl overflow-hidden flex items-center justify-center border border-slate-800">
             {activeTab === "camera" && !capturedImage ? (
-              <div className="relative w-full h-full flex items-center justify-center">
+              <div className="relative w-full h-full flex items-center justify-center bg-black">
                 <video
                   ref={videoRef}
                   autoPlay
@@ -359,21 +348,21 @@ export const Step3ScanSheet: React.FC<Step3ScanSheetProps> = ({
                 {showGuideGrid && <ScanGuideGrid mode={gridMode} opacity={0.9} />}
 
                 {/* Camera Buttons Floating */}
-                <div className="absolute bottom-4 inset-x-0 flex items-center justify-center gap-3 z-20">
+                <div className="absolute bottom-4 inset-x-0 flex items-center justify-center gap-3 z-20 px-4">
                   <button
                     onClick={() =>
                       setCameraFacing((prev) =>
                         prev === "environment" ? "user" : "environment"
                       )
                     }
-                    className="p-3 rounded-full bg-slate-800/80 text-white hover:bg-slate-700 transition backdrop-blur-sm"
+                    className="p-3 rounded-full bg-slate-900/80 text-white hover:bg-slate-800 transition backdrop-blur-md border border-slate-700/60 shadow-lg active:scale-95"
                     title="Switch Camera"
                   >
                     <SwitchCamera className="w-5 h-5" />
                   </button>
                   <button
                     onClick={snapPhoto}
-                    className="px-6 py-3 rounded-full bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm shadow-lg shadow-blue-500/30 active:scale-95 transition flex items-center gap-2"
+                    className="px-6 py-3 rounded-full bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm shadow-xl shadow-blue-500/30 active:scale-95 transition flex items-center gap-2 border border-blue-400/40"
                   >
                     <Camera className="w-5 h-5" />
                     Snap Answer Sheet
@@ -387,7 +376,7 @@ export const Step3ScanSheet: React.FC<Step3ScanSheetProps> = ({
                   src={capturedImage}
                   alt="Scanned Sheet Preview"
                   style={{ transform: `rotate(${rotation}deg)` }}
-                  className="max-h-[440px] max-w-full w-auto object-contain transition-transform duration-200 rounded-lg shadow-lg border border-slate-700/60"
+                  className="max-h-full max-w-full w-auto object-contain transition-transform duration-200 rounded-lg shadow-lg border border-slate-700/60"
                 />
 
                 <div className="absolute top-3 right-3 flex items-center gap-2 z-20">
