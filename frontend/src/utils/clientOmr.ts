@@ -203,8 +203,8 @@ export async function processImageClientSide(
   let boxH: number;
 
   if (isCompactSheet) {
-    gridY0 = 0.1055 * targetHeight;
-    gridY1 = 0.9541 * targetHeight;
+    gridY0 = 0.1045 * targetHeight;
+    gridY1 = 0.9707 * targetHeight;
     boxW = Math.round(0.018 * targetWidth); // ~36 px
     boxH = Math.round(0.012 * targetHeight); // ~37 px
   } else {
@@ -216,11 +216,102 @@ export async function processImageClientSide(
 
   const gridStepY = (gridY1 - gridY0) / 39.0;
 
+  // Calibrate horizontal and vertical fine shifts dynamically
+  let fineShiftX = 0;
+  let fineShiftY = 0;
+  let bestScoreX = -1;
+
+  for (let dx = -28; dx <= 28; dx += 2) {
+    let marginSum = 0;
+    let count = 0;
+    for (let s = 0; s <= Math.min(1, COLUMNS_CONFIG.length - 1); s++) {
+      for (let q = 1; q <= 6; q++) {
+        const yC = Math.round(gridY0 + (q - 1) * gridStepY);
+        const fills: number[] = [];
+        for (const opt of ["A", "B", "C", "D"]) {
+          let xC: number;
+          if (isCompactSheet) {
+            xC = Math.round(COMPACT_COLUMN_CENTERS[s][opt]) + dx;
+          } else {
+            const offsetPt = colOffsets[s][opt];
+            xC = Math.round(gridX0 + offsetPt * gridScaleX) + dx;
+          }
+          let darkCount = 0;
+          let totalProbe = 0;
+          for (let py = yC - 6; py <= yC + 6; py += 2) {
+            if (py < 0 || py >= targetHeight) continue;
+            for (let px = xC - 6; px <= xC + 6; px += 2) {
+              if (px < 0 || px >= targetWidth) continue;
+              const idx = (py * targetWidth + px) * 4;
+              const lum = 0.299 * pixels[idx] + 0.587 * pixels[idx + 1] + 0.114 * pixels[idx + 2];
+              if (lum < darkThreshold) darkCount++;
+              totalProbe++;
+            }
+          }
+          fills.push(totalProbe > 0 ? darkCount / totalProbe : 0);
+        }
+        fills.sort((a, b) => b - a);
+        marginSum += fills[0] - fills[1];
+        count++;
+      }
+    }
+    const avgM = count > 0 ? marginSum / count : 0;
+    if (avgM > bestScoreX) {
+      bestScoreX = avgM;
+      fineShiftX = dx;
+    }
+  }
+
+  let bestScoreY = -1;
+  for (let dy = -16; dy <= 16; dy += 2) {
+    let marginSum = 0;
+    let count = 0;
+    for (let s = 0; s <= Math.min(1, COLUMNS_CONFIG.length - 1); s++) {
+      for (let q = 1; q <= 6; q++) {
+        const yC = Math.round(gridY0 + (q - 1) * gridStepY) + dy;
+        const fills: number[] = [];
+        for (const opt of ["A", "B", "C", "D"]) {
+          let xC: number;
+          if (isCompactSheet) {
+            xC = Math.round(COMPACT_COLUMN_CENTERS[s][opt]) + fineShiftX;
+          } else {
+            const offsetPt = colOffsets[s][opt];
+            xC = Math.round(gridX0 + offsetPt * gridScaleX) + fineShiftX;
+          }
+          let darkCount = 0;
+          let totalProbe = 0;
+          for (let py = yC - 6; py <= yC + 6; py += 2) {
+            if (py < 0 || py >= targetHeight) continue;
+            for (let px = xC - 6; px <= xC + 6; px += 2) {
+              if (px < 0 || px >= targetWidth) continue;
+              const idx = (py * targetWidth + px) * 4;
+              const lum = 0.299 * pixels[idx] + 0.587 * pixels[idx + 1] + 0.114 * pixels[idx + 2];
+              if (lum < darkThreshold) darkCount++;
+              totalProbe++;
+            }
+          }
+          fills.push(totalProbe > 0 ? darkCount / totalProbe : 0);
+        }
+        fills.sort((a, b) => b - a);
+        marginSum += fills[0] - fills[1];
+        count++;
+      }
+    }
+    const avgM = count > 0 ? marginSum / count : 0;
+    if (avgM > bestScoreY) {
+      bestScoreY = avgM;
+      fineShiftY = dy;
+    }
+  }
+
   const fillThresh = rules?.fill_threshold ?? 0.30;
   const uncertainThresh = rules?.uncertain_lower_threshold ?? 0.16;
   const ambiguityMargin = rules?.ambiguity_margin ?? 0.12;
   const pointsPerCorrect = rules?.points_per_correct ?? 1.0;
   const pointsPerIncorrect = rules?.points_per_incorrect ?? 0.0;
+
+  const coreHalfW = Math.max(4, Math.round(boxW * 0.22));
+  const coreHalfH = Math.max(4, Math.round(boxH * 0.22));
 
   const questions: QuestionAnswer[] = [];
 
@@ -233,40 +324,35 @@ export async function processImageClientSide(
       const qStr = globalQNum.toString();
       const correctKey = answerKey.answers[qStr] || "BLANK";
 
-      const yCenterPx = Math.round(gridY0 + (qIdx - 1) * gridStepY);
+      const yCenterPx = Math.round(gridY0 + (qIdx - 1) * gridStepY) + fineShiftY;
 
       const choices: ChoiceOption[] = [];
 
       for (const opt of ["A", "B", "C", "D"]) {
         let xCenterPx: number;
         if (isCompactSheet) {
-          xCenterPx = Math.round(COMPACT_COLUMN_CENTERS[secIdx][opt]);
+          xCenterPx = Math.round(COMPACT_COLUMN_CENTERS[secIdx][opt]) + fineShiftX;
         } else {
           const offsetPt = colOffsets[secIdx][opt];
-          xCenterPx = Math.round(gridX0 + offsetPt * gridScaleX);
+          xCenterPx = Math.round(gridX0 + offsetPt * gridScaleX) + fineShiftX;
         }
         const xMin = xCenterPx - Math.floor(boxW / 2);
         const yMin = yCenterPx - Math.floor(boxH / 2);
 
-        // Sample inner 60%
-        const marginX = Math.round(boxW * 0.20);
-        const marginY = Math.round(boxH * 0.20);
-
+        // Sample strictly the inner core (~45% dimension) to avoid touching the printed black border
         let darkCount = 0;
         let totalCount = 0;
 
-        for (let y = yMin + marginY; y < yMin + boxH - marginY; y++) {
+        for (let y = yCenterPx - coreHalfH; y <= yCenterPx + coreHalfH; y++) {
           if (y < 0 || y >= targetHeight) continue;
-          for (let x = xMin + marginX; x < xMin + boxW - marginX; x++) {
+          for (let x = xCenterPx - coreHalfW; x <= xCenterPx + coreHalfW; x++) {
             if (x < 0 || x >= targetWidth) continue;
             const idx = (y * targetWidth + x) * 4;
-            // Grayscale luminance
             const r = pixels[idx];
             const g = pixels[idx + 1];
             const b = pixels[idx + 2];
             const lum = 0.299 * r + 0.587 * g + 0.114 * b;
 
-            // Adaptive threshold for pencil/pen mark
             if (lum < darkThreshold) {
               darkCount++;
             }
