@@ -71,11 +71,12 @@ export const Step3ScanSheet: React.FC<Step3ScanSheetProps> = ({
       if (mediaStreamRef.current) {
         mediaStreamRef.current.getTracks().forEach((track) => track.stop());
       }
+      const isPortrait = typeof window !== "undefined" && window.innerHeight > window.innerWidth;
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
           facingMode: cameraFacing,
-          width: { ideal: 1920 },
-          height: { ideal: 1080 },
+          width: { ideal: isPortrait ? 1080 : 1920 },
+          height: { ideal: isPortrait ? 1920 : 1080 },
         },
       });
       mediaStreamRef.current = stream;
@@ -112,13 +113,32 @@ export const Step3ScanSheet: React.FC<Step3ScanSheetProps> = ({
   const snapPhoto = () => {
     if (!videoRef.current) return;
     const video = videoRef.current;
+    const vw = video.videoWidth || 1280;
+    const vh = video.videoHeight || 720;
+    const isPortraitDisplay = typeof window !== "undefined" && window.innerHeight > window.innerWidth;
+    const needRotate = isPortraitDisplay && vw > vh;
+
     const canvas = document.createElement("canvas");
-    canvas.width = video.videoWidth || 1280;
-    canvas.height = video.videoHeight || 720;
+    if (needRotate) {
+      canvas.width = vh;
+      canvas.height = vw;
+    } else {
+      canvas.width = vw;
+      canvas.height = vh;
+    }
+
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    const dataUrl = canvas.toDataURL("image/jpeg", 0.92);
+
+    if (needRotate) {
+      ctx.translate(canvas.width / 2, canvas.height / 2);
+      ctx.rotate((90 * Math.PI) / 180);
+      ctx.drawImage(video, -vw / 2, -vh / 2);
+    } else {
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    }
+
+    const dataUrl = canvas.toDataURL("image/jpeg", 0.95);
     setCapturedImage(dataUrl);
 
     // Convert data URL to Blob file
@@ -127,7 +147,7 @@ export const Step3ScanSheet: React.FC<Step3ScanSheetProps> = ({
         const file = new File([blob], "camera_snapshot.jpg", { type: "image/jpeg" });
         setImageFile(file);
       }
-    }, "image/jpeg", 0.92);
+    }, "image/jpeg", 0.95);
 
     stopCamera();
   };
@@ -210,7 +230,9 @@ export const Step3ScanSheet: React.FC<Step3ScanSheetProps> = ({
         imageFile,
         answerKey,
         studentName,
-        controlNumber
+        controlNumber,
+        rotation,
+        rules
       );
       onGraded(clientResult);
     } catch (clientErr: any) {
@@ -391,31 +413,49 @@ export const Step3ScanSheet: React.FC<Step3ScanSheetProps> = ({
                 </div>
               </div>
             ) : (
-              /* Upload Dropzone */
-              <label className="flex flex-col items-center justify-center p-8 text-center cursor-pointer w-full h-full">
-                <input
-                  type="file"
-                  accept="image/png,image/jpeg,image/webp,application/pdf"
-                  className="hidden"
-                  onChange={(e) => {
-                    if (e.target.files && e.target.files[0]) {
-                      handleFileUpload(e.target.files[0]);
-                    }
-                  }}
-                />
+              /* Upload Dropzone & Native Mobile Camera Trigger */
+              <div className="flex flex-col items-center justify-center p-8 text-center w-full h-full">
                 <div className="w-14 h-14 rounded-2xl bg-slate-800 text-blue-400 flex items-center justify-center mb-3">
                   <UploadCloud className="w-7 h-7" />
                 </div>
                 <p className="text-sm font-semibold text-white">
-                  Drop paper photo or scanned PDF here
+                  Upload Answer Sheet Photo or Scanned PDF
                 </p>
                 <p className="text-xs text-slate-400 mt-1 max-w-xs">
-                  PNG, JPG, WEBP, or single-page PDF. 200+ DPI recommended for highest accuracy.
+                  PNG, JPG, WEBP, or single-page PDF. Auto-aligns portrait and landscape captures.
                 </p>
-                <span className="mt-4 px-4 py-2 rounded-xl text-xs font-semibold bg-blue-600 text-white hover:bg-blue-700 transition">
-                  Browse Device Files
-                </span>
-              </label>
+                <div className="mt-4 flex flex-wrap items-center justify-center gap-3">
+                  <label className="px-4 py-2 rounded-xl text-xs font-semibold bg-blue-600 text-white hover:bg-blue-700 transition cursor-pointer flex items-center gap-2 shadow-xs">
+                    <UploadCloud className="w-4 h-4" />
+                    <span>Browse Files</span>
+                    <input
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp,application/pdf"
+                      className="hidden"
+                      onChange={(e) => {
+                        if (e.target.files && e.target.files[0]) {
+                          handleFileUpload(e.target.files[0]);
+                        }
+                      }}
+                    />
+                  </label>
+                  <label className="px-4 py-2 rounded-xl text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-700 transition cursor-pointer flex items-center gap-2 shadow-xs">
+                    <Camera className="w-4 h-4" />
+                    <span>Take Photo with Camera</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      className="hidden"
+                      onChange={(e) => {
+                        if (e.target.files && e.target.files[0]) {
+                          handleFileUpload(e.target.files[0]);
+                        }
+                      }}
+                    />
+                  </label>
+                </div>
+              </div>
             )}
           </div>
 

@@ -42,19 +42,37 @@ export async function processImageClientSide(
   imageSource: File | string,
   answerKey: AnswerKeyData,
   studentName: string = "Candidate",
-  controlNumber: string = "N/A"
+  controlNumber: string = "N/A",
+  rotationDegrees: number = 0,
+  rules?: GradingRules
 ): Promise<GradingResult> {
   const startTime = performance.now();
 
   // Load image into an HTML Image element
   const img = new Image();
+  const isCreatedUrl = typeof imageSource !== "string";
   const imageUrl = typeof imageSource === "string" ? imageSource : URL.createObjectURL(imageSource);
 
-  await new Promise<void>((resolve, reject) => {
-    img.onload = () => resolve();
-    img.onerror = () => reject(new Error("Failed to load image for scanning"));
-    img.src = imageUrl;
-  });
+  try {
+    await new Promise<void>((resolve, reject) => {
+      img.onload = () => resolve();
+      img.onerror = () => reject(new Error("Failed to load image for scanning"));
+      img.src = imageUrl;
+    });
+  } finally {
+    if (isCreatedUrl) {
+      URL.revokeObjectURL(imageUrl);
+    }
+  }
+
+  const origW = img.naturalWidth || img.width || 612;
+  const origH = img.naturalHeight || img.height || 936;
+
+  // Auto-orient: if image is landscape (origW > origH) and rotation is 0, rotate 90° CW to portrait
+  let effectiveRotation = rotationDegrees % 360;
+  if (effectiveRotation === 0 && origW > origH) {
+    effectiveRotation = 90;
+  }
 
   const canvas = document.createElement("canvas");
   const targetWidth = 2000;
@@ -67,17 +85,47 @@ export async function processImageClientSide(
     throw new Error("Could not initialize 2D canvas context");
   }
 
-  // Draw scaled image
-  ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
+  // Draw scaled and rotated image onto portrait canonical canvas
+  ctx.save();
+  if (effectiveRotation === 90) {
+    ctx.translate(targetWidth, 0);
+    ctx.rotate((90 * Math.PI) / 180);
+    ctx.drawImage(img, 0, 0, targetHeight, targetWidth);
+  } else if (effectiveRotation === 180) {
+    ctx.translate(targetWidth, targetHeight);
+    ctx.rotate(Math.PI);
+    ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
+  } else if (effectiveRotation === 270) {
+    ctx.translate(0, targetHeight);
+    ctx.rotate((270 * Math.PI) / 180);
+    ctx.drawImage(img, 0, 0, targetHeight, targetWidth);
+  } else {
+    ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
+  }
+  ctx.restore();
 
   // Extract pixel data for grayscale analysis
   const imageData = ctx.getImageData(0, 0, targetWidth, targetHeight);
   const pixels = imageData.data;
 
+  // Estimate background paper luminance adaptively to handle mobile room lighting & shadows
+  const sampleLum: number[] = [];
+  const sampleStep = Math.max(1, Math.floor(pixels.length / (4 * 600)));
+  for (let i = 0; i < pixels.length; i += sampleStep * 4) {
+    const r = pixels[i];
+    const g = pixels[i + 1];
+    const b = pixels[i + 2];
+    sampleLum.push(0.299 * r + 0.587 * g + 0.114 * b);
+  }
+  sampleLum.sort((a, b) => a - b);
+  const paperLum = sampleLum[Math.floor(sampleLum.length * 0.85)] || 230;
+  // Mark threshold adapts to ambient paper brightness (pencil/pen mark is significantly darker)
+  const darkThreshold = Math.max(50, Math.min(185, paperLum * 0.78));
+
   // Determine if image is cropped (aspect ratio < 1.45 where headers were omitted)
-  const origW = img.naturalWidth || img.width || 612;
-  const origH = img.naturalHeight || img.height || 936;
-  const aspectRatio = origH / origW;
+  const effectiveW = effectiveRotation === 90 || effectiveRotation === 270 ? origH : origW;
+  const effectiveH = effectiveRotation === 90 || effectiveRotation === 270 ? origW : origH;
+  const aspectRatio = effectiveH / effectiveW;
   const isCropped = aspectRatio < 1.45;
 
   const PDF_GRID_W = 512.3 - 71.2; // 441.1 pt
@@ -109,6 +157,12 @@ export async function processImageClientSide(
   const gridStepY = (gridY1 - gridY0) / 39.0;
   const boxW = Math.round((12.0 / PAGE_WIDTH_PT) * targetWidth);
   const boxH = Math.round((12.0 / PAGE_HEIGHT_PT) * targetHeight);
+
+  const fillThresh = rules?.fill_threshold ?? 0.30;
+  const uncertainThresh = rules?.uncertain_lower_threshold ?? 0.16;
+  const ambiguityMargin = rules?.ambiguity_margin ?? 0.12;
+  const pointsPerCorrect = rules?.points_per_correct ?? 1.0;
+  const pointsPerIncorrect = rules?.points_per_incorrect ?? 0.0;
 
   const questions: QuestionAnswer[] = [];
 
@@ -148,8 +202,8 @@ export async function processImageClientSide(
             const b = pixels[idx + 2];
             const lum = 0.299 * r + 0.587 * g + 0.114 * b;
 
-            // Threshold for pencil/pen mark
-            if (lum < 165) {
+            // Adaptive threshold for pencil/pen mark
+            if (lum < darkThreshold) {
               darkCount++;
             }
             totalCount++;
@@ -173,7 +227,7 @@ export async function processImageClientSide(
 
       // Multiple marks check: Only ambiguous if top two choices are both heavily marked or competing closely
       const isCompetingMultiple =
-        (topFill >= 0.40 && secondFill >= 0.35 && (topFill - secondFill < 0.12)) ||
+        (topFill >= 0.40 && secondFill >= 0.35 && (topFill - secondFill < ambiguityMargin)) ||
         (topFill >= 0.25 && secondFill >= 0.25 && (topFill - secondFill < 0.05));
 
       let studentAnswer = "BLANK";
@@ -182,28 +236,28 @@ export async function processImageClientSide(
       let needsReview = false;
       let points = 0.0;
 
-      if (topFill < 0.16) {
+      if (topFill < uncertainThresh) {
         studentAnswer = "BLANK";
         status = "unanswered";
         confidence = Math.max(0.5, 1.0 - topFill);
       } else if (isCompetingMultiple) {
         const competing = choices
-          .filter((c) => c.fill_ratio >= Math.max(0.25, topFill - 0.12))
+          .filter((c) => c.fill_ratio >= Math.max(0.25, topFill - ambiguityMargin))
           .map((c) => c.id);
         studentAnswer = competing.length > 1 ? competing.join(", ") : `${choices[0].id}?`;
         status = "ambiguous";
         confidence = 0.40;
         needsReview = true;
-      } else if (topFill >= 0.30 || (topFill >= 0.25 && (topFill - secondFill >= 0.05))) {
+      } else if (topFill >= fillThresh || (topFill >= 0.25 && (topFill - secondFill >= 0.05))) {
         studentAnswer = choices[0].id;
         confidence = Math.min(1.0, 0.70 + (topFill - secondFill) * 0.5);
 
         if (correctKey === studentAnswer) {
           status = "correct";
-          points = 1.0;
+          points = pointsPerCorrect;
         } else {
           status = "incorrect";
-          points = 0.0;
+          points = pointsPerIncorrect;
         }
       } else {
         studentAnswer = choices[0].id;
@@ -214,7 +268,7 @@ export async function processImageClientSide(
 
       if (correctKey === "BLANK" && studentAnswer === "BLANK") {
         status = "correct";
-        points = 1.0;
+        points = pointsPerCorrect;
         needsReview = false;
       }
 
@@ -236,7 +290,7 @@ export async function processImageClientSide(
         confidence: Math.round(confidence * 100) / 100,
         needs_review: needsReview,
         points_awarded: points,
-        points_possible: 1.0,
+        points_possible: pointsPerCorrect,
         choices,
         notes: `Fill: ${topFill.toFixed(2)} (2nd: ${secondFill.toFixed(2)})`,
       };

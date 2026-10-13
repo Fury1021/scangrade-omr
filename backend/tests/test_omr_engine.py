@@ -165,3 +165,60 @@ def test_omr_engine_dynamic_grid_cropped_sheet():
     total_score = sum(q.points_awarded for q in questions)
     assert total_score >= 155.0, f"Expected near-perfect score on cropped sheet, got {total_score}"
 
+
+def test_omr_engine_mobile_dimmed_and_shadowed():
+    """Verifies that Otsu thresholding allows accurate grading under dim indoor lighting and shadows."""
+    import cv2
+    from backend.app.services.pdf_extractor import extract_answer_key_from_bytes
+    
+    with open('backend/sample_data/AISCC_Batch_02_Answer_Key.pdf', 'rb') as f:
+        key_data = extract_answer_key_from_bytes(f.read())
+        
+    im = cv2.imread('backend/sample_data/sample_answer_key_300dpi.png')
+    assert im is not None
+    
+    # 1. Dimmed indoor room lighting (paper white ~ 180 instead of 255)
+    dimmed = (im.astype(np.float32) * 0.72).astype(np.uint8)
+    _, enc_dim = cv2.imencode('.png', dimmed)
+    
+    engine = OMREngine()
+    qs_dim, _, _, _ = engine.process_image(enc_dim.tobytes(), key_data, auto_align=True)
+    score_dim = sum(q.points_awarded for q in qs_dim)
+    assert score_dim >= 155.0, f"Expected high score on dimmed sheet, got {score_dim}"
+    
+    # 2. Uneven gradient shadow across the sheet
+    H, W = im.shape[:2]
+    grad = np.linspace(0.95, 0.45, H)[:, None, None]
+    shadowed = (im.astype(np.float32) * grad).astype(np.uint8)
+    _, enc_shadow = cv2.imencode('.png', shadowed)
+    
+    qs_shadow, _, _, _ = engine.process_image(enc_shadow.tobytes(), key_data, auto_align=True)
+    score_shadow = sum(q.points_awarded for q in qs_shadow)
+    assert score_shadow >= 155.0, f"Expected high score on shadowed sheet, got {score_shadow}"
+
+
+def test_omr_engine_mobile_auto_orientation():
+    """Verifies that landscape mobile captures (W > H) are automatically oriented to portrait."""
+    import cv2
+    from backend.app.services.pdf_extractor import extract_answer_key_from_bytes
+    
+    with open('backend/sample_data/AISCC_Batch_02_Answer_Key.pdf', 'rb') as f:
+        key_data = extract_answer_key_from_bytes(f.read())
+        
+    im = cv2.imread('backend/sample_data/sample_answer_key_300dpi.png')
+    assert im is not None
+    engine = OMREngine()
+    
+    # 1. Landscape Clockwise
+    land_cw = cv2.rotate(im, cv2.ROTATE_90_CLOCKWISE)
+    _, enc_cw = cv2.imencode('.png', land_cw)
+    qs_cw, _, _, _ = engine.process_image(enc_cw.tobytes(), key_data, auto_align=True)
+    assert sum(q.points_awarded for q in qs_cw) >= 155.0
+    
+    # 2. Landscape Counter-Clockwise
+    land_ccw = cv2.rotate(im, cv2.ROTATE_90_COUNTERCLOCKWISE)
+    _, enc_ccw = cv2.imencode('.png', land_ccw)
+    qs_ccw, _, _, _ = engine.process_image(enc_ccw.tobytes(), key_data, auto_align=True)
+    assert sum(q.points_awarded for q in qs_ccw) >= 155.0
+
+

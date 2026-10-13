@@ -42,7 +42,7 @@ class OMREngine:
         """
         H, W = img.shape[:2]
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if len(img.shape) == 3 else img
-        _, thresh = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY_INV)
+        _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
         contours, _ = cv2.findContours(thresh, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
         
         min_dim = int(W * 0.010)
@@ -139,6 +139,46 @@ class OMREngine:
                 
         return grid, thresh
 
+    def _orient_sheet_upright(self, img: np.ndarray) -> np.ndarray:
+        """
+        Ensures the answer sheet image is in portrait orientation (H > W) and upright.
+        Mobile devices often deliver landscape images (W > H) or inverted orientations.
+        """
+        H, W = img.shape[:2]
+        
+        # If image is landscape (W > H), answer sheets are strictly portrait.
+        # Test rotating 90° CCW vs 90° CW to determine which is upright.
+        if W > H:
+            cand_ccw = cv2.rotate(img, cv2.ROTATE_90_COUNTERCLOCKWISE)
+            cand_cw = cv2.rotate(img, cv2.ROTATE_90_CLOCKWISE)
+            
+            g_ccw, _ = self.detect_dynamic_grid(cand_ccw)
+            g_cw, _ = self.detect_dynamic_grid(cand_cw)
+            
+            if g_ccw is not None and g_cw is None:
+                return cand_ccw
+            elif g_cw is not None and g_ccw is None:
+                return cand_cw
+            elif g_ccw is not None and g_cw is not None:
+                y_ccw = np.mean([q["y_center"] for q in g_ccw]) / float(cand_ccw.shape[0])
+                y_cw = np.mean([q["y_center"] for q in g_cw]) / float(cand_cw.shape[0])
+                # Upright sheet has header at top and grid at bottom (higher mean Y)
+                return cand_ccw if y_ccw >= y_cw else cand_cw
+            else:
+                # Default landscape to portrait
+                return cand_ccw
+                
+        # If image is portrait (H >= W):
+        grid, _ = self.detect_dynamic_grid(img)
+        if grid is None:
+            # If dynamic grid failed in current portrait orientation, test 180° rotation
+            cand_180 = cv2.rotate(img, cv2.ROTATE_180)
+            grid_180, _ = self.detect_dynamic_grid(cand_180)
+            if grid_180 is not None:
+                return cand_180
+                
+        return img
+
     def process_image(
         self,
         image_bytes: bytes,
@@ -148,11 +188,12 @@ class OMREngine:
     ) -> Tuple[List[QuestionAnswer], str, str, float]:
         """
         Runs the full OMR pipeline:
-        1. Decode image & apply manual rotation if requested
-        2. Detect dynamic answer grid (or detect paper boundary & warp)
-        3. Measure bubble shading & compute fill ratios
-        4. Compare against answer key
-        5. Generate annotated overlay image
+        1. Decode image (respecting EXIF orientation) & apply manual rotation if requested
+        2. Auto-orient sheet to upright portrait
+        3. Detect dynamic answer grid (or detect paper boundary & warp)
+        4. Measure bubble shading & compute fill ratios
+        5. Compare against answer key
+        6. Generate annotated overlay image
         
         Returns:
             questions: List of QuestionAnswer
@@ -162,19 +203,33 @@ class OMREngine:
         """
         start_time = time.time()
         
-        # 1. Decode image
-        nparr = np.frombuffer(image_bytes, np.uint8)
-        raw_img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        # 1. Decode image with EXIF orientation support (iOS/Android photos)
+        try:
+            from PIL import Image, ImageOps
+            import io
+            pil_img = Image.open(io.BytesIO(image_bytes))
+            pil_img = ImageOps.exif_transpose(pil_img)
+            if pil_img.mode != "RGB":
+                pil_img = pil_img.convert("RGB")
+            raw_img = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
+        except Exception:
+            nparr = np.frombuffer(image_bytes, np.uint8)
+            raw_img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+
         if raw_img is None:
             raise ValueError("Invalid image file: could not decode image")
             
-        # Apply manual rotation if requested
+        # Apply manual rotation if explicitly requested
         if rotation_degrees == 90:
             raw_img = cv2.rotate(raw_img, cv2.ROTATE_90_CLOCKWISE)
         elif rotation_degrees == 180:
             raw_img = cv2.rotate(raw_img, cv2.ROTATE_180)
         elif rotation_degrees == 270:
             raw_img = cv2.rotate(raw_img, cv2.ROTATE_90_COUNTERCLOCKWISE)
+            
+        # Auto-orient to upright portrait if auto_align is enabled
+        if auto_align:
+            raw_img = self._orient_sheet_upright(raw_img)
             
         # 2. Check for dynamic grid directly on raw_img (works for cropped screenshots, phone photos)
         dynamic_grid, dynamic_thresh = self.detect_dynamic_grid(raw_img) if auto_align else (None, None)
