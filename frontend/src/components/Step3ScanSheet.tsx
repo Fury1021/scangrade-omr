@@ -313,36 +313,38 @@ export const Step3ScanSheet: React.FC<Step3ScanSheetProps> = ({
               </button>
             </div>
 
-            {/* Guide Grid Controls */}
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setShowGuideGrid((prev) => !prev)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition border ${
-                  showGuideGrid
-                    ? "bg-cyan-50 dark:bg-cyan-950/60 text-cyan-700 dark:text-cyan-300 border-cyan-300 dark:border-cyan-800 shadow-xs"
-                    : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700 hover:text-slate-900"
-                }`}
-                title="Toggle visual alignment guidelines"
-              >
-                <Grid className="w-3.5 h-3.5 text-cyan-500" />
-                <span>Guide Grid: {showGuideGrid ? "ON" : "OFF"}</span>
-              </button>
-              {showGuideGrid && (
-                <select
-                  value={gridMode}
-                  onChange={(e) => setGridMode(e.target.value as any)}
-                  className="px-2.5 py-1.5 rounded-xl text-xs font-semibold bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 focus:outline-none"
+            {/* Guide Grid Controls (only for live camera viewfinder) */}
+            {activeTab === "camera" && !capturedImage && (
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowGuideGrid((prev) => !prev)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition border ${
+                    showGuideGrid
+                      ? "bg-cyan-50 dark:bg-cyan-950/60 text-cyan-700 dark:text-cyan-300 border-cyan-300 dark:border-cyan-800 shadow-xs"
+                      : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700 hover:text-slate-900"
+                  }`}
+                  title="Toggle live camera viewfinder guidelines"
                 >
-                  <option value="exam-4col">4 Subject Columns (1–40)</option>
-                  <option value="rule-of-thirds">3×3 Framing Grid</option>
-                </select>
-              )}
-            </div>
+                  <Grid className="w-3.5 h-3.5 text-cyan-500" />
+                  <span>Camera Guide: {showGuideGrid ? "ON" : "OFF"}</span>
+                </button>
+                {showGuideGrid && (
+                  <select
+                    value={gridMode}
+                    onChange={(e) => setGridMode(e.target.value as any)}
+                    className="px-2.5 py-1.5 rounded-xl text-xs font-semibold bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 focus:outline-none"
+                  >
+                    <option value="exam-4col">4 Subject Columns (1–40)</option>
+                    <option value="rule-of-thirds">3×3 Framing Grid</option>
+                  </select>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Viewport Area */}
-          <div className="relative flex-1 min-h-[360px] bg-slate-950 rounded-xl overflow-hidden flex items-center justify-center border border-slate-800">
+          <div className="relative flex-1 min-h-[380px] bg-slate-950 rounded-xl overflow-hidden flex items-center justify-center border border-slate-800">
             {activeTab === "camera" && !capturedImage ? (
               <div className="relative w-full h-full flex items-center justify-center">
                 <video
@@ -353,7 +355,7 @@ export const Step3ScanSheet: React.FC<Step3ScanSheetProps> = ({
                   className="w-full h-full object-contain"
                 />
                 
-                {/* Visual Alignment Guide Frame with 4-Column Grid */}
+                {/* Visual Alignment Guide Frame with 4-Column Grid for live camera aiming */}
                 {showGuideGrid && <ScanGuideGrid mode={gridMode} opacity={0.9} />}
 
                 {/* Camera Buttons Floating */}
@@ -379,22 +381,19 @@ export const Step3ScanSheet: React.FC<Step3ScanSheetProps> = ({
                 </div>
               </div>
             ) : capturedImage ? (
-              <div className="relative w-full h-full flex items-center justify-center p-2">
+              <div className="relative w-full h-full flex flex-col items-center justify-center p-3">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={capturedImage}
                   alt="Scanned Sheet Preview"
                   style={{ transform: `rotate(${rotation}deg)` }}
-                  className="max-h-[460px] w-auto object-contain transition-transform duration-200 rounded"
+                  className="max-h-[440px] max-w-full w-auto object-contain transition-transform duration-200 rounded-lg shadow-lg border border-slate-700/60"
                 />
-                
-                {/* Guide Grid Overlay on Preview */}
-                {showGuideGrid && <ScanGuideGrid mode={gridMode} opacity={0.7} />}
 
                 <div className="absolute top-3 right-3 flex items-center gap-2 z-20">
                   <button
                     onClick={handleRotate}
-                    className="p-2 rounded-lg bg-black/70 text-white hover:bg-black transition backdrop-blur-xs text-xs font-semibold flex items-center gap-1.5"
+                    className="p-2 rounded-lg bg-black/75 text-white hover:bg-black transition backdrop-blur-xs text-xs font-semibold flex items-center gap-1.5 border border-slate-700 shadow-sm"
                     title="Rotate 90 degrees"
                   >
                     <RotateCw className="w-4 h-4" />
@@ -406,10 +405,18 @@ export const Step3ScanSheet: React.FC<Step3ScanSheetProps> = ({
                       setImageFile(null);
                       if (activeTab === "camera") startCamera();
                     }}
-                    className="px-3 py-1.5 rounded-lg bg-black/70 text-white hover:bg-red-600 transition backdrop-blur-xs text-xs font-semibold"
+                    className="px-3 py-1.5 rounded-lg bg-black/75 text-white hover:bg-red-600 transition backdrop-blur-xs text-xs font-semibold border border-slate-700 shadow-sm"
                   >
                     Clear / Retake
                   </button>
+                </div>
+
+                {/* Status badge: explains that automatic detection runs when Grade is clicked */}
+                <div className="absolute bottom-3 inset-x-0 flex justify-center pointer-events-none z-20 px-2">
+                  <div className="bg-slate-900/90 backdrop-blur-md text-emerald-400 border border-emerald-500/30 text-xs px-3.5 py-1.5 rounded-full font-medium flex items-center gap-2 shadow-lg">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                    <span>Sheet loaded. Click &quot;Grade Answer Sheet&quot; below to scan.</span>
+                  </div>
                 </div>
               </div>
             ) : (
