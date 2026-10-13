@@ -122,11 +122,52 @@ export async function processImageClientSide(
   // Mark threshold adapts to ambient paper brightness (pencil/pen mark is significantly darker)
   const darkThreshold = Math.max(50, Math.min(185, paperLum * 0.78));
 
-  // Determine if image is cropped (aspect ratio < 1.45 where headers were omitted)
+  // Detect layout by checking ink distribution in top 15% (rows 250 to 500)
+  // In the compact 4-column exam sheet, questions 1-5 start immediately at the top.
+  // In a full-page scan with a large header, the top 15% is white/title.
+  let topInkCount = 0;
+  let topTotalCount = 0;
+  for (let y = 250; y < 500; y += 8) {
+    for (let x = 100; x < targetWidth - 100; x += 8) {
+      const idx = (y * targetWidth + x) * 4;
+      const lum = 0.299 * pixels[idx] + 0.587 * pixels[idx + 1] + 0.114 * pixels[idx + 2];
+      if (lum < darkThreshold) topInkCount++;
+      topTotalCount++;
+    }
+  }
+  const topInkDensity = topTotalCount > 0 ? topInkCount / topTotalCount : 0;
+
+  // Also check leftmost ink position in middle rows (questions column 1 numbering)
+  let firstInkX = targetWidth;
+  for (let x = 40; x < 300; x += 4) {
+    let colDark = 0;
+    for (let y = 1000; y < 2000; y += 16) {
+      const idx = (y * targetWidth + x) * 4;
+      const lum = 0.299 * pixels[idx] + 0.587 * pixels[idx + 1] + 0.114 * pixels[idx + 2];
+      if (lum < darkThreshold) colDark++;
+    }
+    if (colDark > 4) {
+      firstInkX = x;
+      break;
+    }
+  }
+
+  // Compute effective aspect ratio based on rotation
   const effectiveW = effectiveRotation === 90 || effectiveRotation === 270 ? origH : origW;
   const effectiveH = effectiveRotation === 90 || effectiveRotation === 270 ? origW : origH;
   const aspectRatio = effectiveH / effectiveW;
-  const isCropped = aspectRatio < 1.45;
+
+  // Compact 4-column sheet has questions starting near the top (topInkDensity > 0.04)
+  // or question numbering close to the left border (firstInkX < 115) or aspect ratio < 1.45
+  const isCompactSheet = topInkDensity > 0.04 || firstInkX < 115 || aspectRatio < 1.45;
+
+  // Proportional column coordinates for compact 4-column sheets (exact relative centers)
+  const COMPACT_COLUMN_CENTERS: Record<string, number>[] = [
+    { A: 0.0882 * targetWidth, B: 0.1330 * targetWidth, C: 0.1777 * targetWidth, D: 0.2212 * targetWidth },
+    { A: 0.3297 * targetWidth, B: 0.3745 * targetWidth, C: 0.4193 * targetWidth, D: 0.4627 * targetWidth },
+    { A: 0.5712 * targetWidth, B: 0.6160 * targetWidth, C: 0.6594 * targetWidth, D: 0.7042 * targetWidth },
+    { A: 0.8128 * targetWidth, B: 0.8562 * targetWidth, C: 0.9009 * targetWidth, D: 0.9457 * targetWidth },
+  ];
 
   const PDF_GRID_W = 512.3 - 71.2; // 441.1 pt
   const colOffsets: Record<string, number>[] = [
@@ -136,27 +177,28 @@ export async function processImageClientSide(
     { A: 443.7 - 71.2, B: 466.6 - 71.2, C: 489.5 - 71.2, D: 512.3 - 71.2 },
   ];
 
-  let gridX0: number;
-  let gridX1: number;
+  const gridX0 = (71.2 / PAGE_WIDTH_PT) * targetWidth;
+  const gridX1 = (512.3 / PAGE_WIDTH_PT) * targetWidth;
+  const gridScaleX = (gridX1 - gridX0) / PDF_GRID_W;
+
   let gridY0: number;
   let gridY1: number;
+  let boxW: number;
+  let boxH: number;
 
-  if (isCropped) {
-    gridX0 = 0.0893 * targetWidth;
-    gridX1 = 0.9465 * targetWidth;
-    gridY0 = 0.1057 * targetHeight;
+  if (isCompactSheet) {
+    gridY0 = 0.1055 * targetHeight;
     gridY1 = 0.9541 * targetHeight;
+    boxW = Math.round(0.018 * targetWidth); // ~36 px
+    boxH = Math.round(0.012 * targetHeight); // ~37 px
   } else {
-    gridX0 = (71.2 / PAGE_WIDTH_PT) * targetWidth;
-    gridX1 = (512.3 / PAGE_WIDTH_PT) * targetWidth;
     gridY0 = (ROW_START_Y_PT / PAGE_HEIGHT_PT) * targetHeight;
     gridY1 = ((ROW_START_Y_PT + 39 * ROW_STEP_Y_PT) / PAGE_HEIGHT_PT) * targetHeight;
+    boxW = Math.round((12.0 / PAGE_WIDTH_PT) * targetWidth);
+    boxH = Math.round((12.0 / PAGE_HEIGHT_PT) * targetHeight);
   }
 
-  const gridScaleX = (gridX1 - gridX0) / PDF_GRID_W;
   const gridStepY = (gridY1 - gridY0) / 39.0;
-  const boxW = Math.round((12.0 / PAGE_WIDTH_PT) * targetWidth);
-  const boxH = Math.round((12.0 / PAGE_HEIGHT_PT) * targetHeight);
 
   const fillThresh = rules?.fill_threshold ?? 0.30;
   const uncertainThresh = rules?.uncertain_lower_threshold ?? 0.16;
@@ -179,8 +221,14 @@ export async function processImageClientSide(
 
       const choices: ChoiceOption[] = [];
 
-      for (const [opt, offsetPt] of Object.entries(colOffsets[secIdx])) {
-        const xCenterPx = Math.round(gridX0 + offsetPt * gridScaleX);
+      for (const opt of ["A", "B", "C", "D"]) {
+        let xCenterPx: number;
+        if (isCompactSheet) {
+          xCenterPx = Math.round(COMPACT_COLUMN_CENTERS[secIdx][opt]);
+        } else {
+          const offsetPt = colOffsets[secIdx][opt];
+          xCenterPx = Math.round(gridX0 + offsetPt * gridScaleX);
+        }
         const xMin = xCenterPx - Math.floor(boxW / 2);
         const yMin = yCenterPx - Math.floor(boxH / 2);
 
