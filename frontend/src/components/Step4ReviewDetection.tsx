@@ -1,8 +1,9 @@
 "use client";
 
 import React, { useState } from "react";
-import { AlertCircle, CheckCircle2, ArrowRight, ArrowLeft, HelpCircle } from "lucide-react";
-import { GradingResult, QuestionAnswer } from "@/types/grading";
+import { AlertCircle, CheckCircle2, ArrowRight, ArrowLeft, Check } from "lucide-react";
+import { GradingResult } from "@/types/grading";
+import { recalculateAfterCorrectionClient } from "@/utils/scoring";
 
 interface Step4ReviewDetectionProps {
   gradingResult: GradingResult;
@@ -19,34 +20,54 @@ export const Step4ReviewDetection: React.FC<Step4ReviewDetectionProps> = ({
 }) => {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Filter questions that need review
-  const uncertainQuestions = gradingResult.questions.filter(
-    (q) => q.needs_review || q.status === "ambiguous"
+  // Keep track of question numbers that were flagged in this session
+  // so examiners can view and verify choices without items abruptly disappearing
+  const [flaggedQNums] = useState<number[]>(() => {
+    return gradingResult.questions
+      .filter((q) => q.needs_review || q.status === "ambiguous" || q.notes?.includes("Manually verified"))
+      .map((q) => q.question_number);
+  });
+
+  // Review list: show questions that were flagged, or currently need review
+  const reviewQuestions = gradingResult.questions.filter((q) =>
+    flaggedQNums.includes(q.question_number) || q.needs_review || q.status === "ambiguous"
   );
+
+  const pendingCount = reviewQuestions.filter(
+    (q) => q.needs_review || q.status === "ambiguous"
+  ).length;
+
+  const verifiedCount = reviewQuestions.length - pendingCount;
 
   const handleCorrectQuestion = async (qNum: number, chosenAnswer: string) => {
     setIsSubmitting(true);
     try {
-      const res = await fetch("/api/grading/correct", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          current_result: gradingResult,
-          correction: {
-            question_number: qNum,
-            corrected_answer: chosenAnswer,
-          },
-        }),
-      });
-
-      if (!res.ok) {
-        throw new Error("Failed to apply correction.");
-      }
-
-      const updated: GradingResult = await res.json();
+      // 1. Immediately apply deterministic client recalculation for instant responsive UI
+      const updated = recalculateAfterCorrectionClient(
+        gradingResult,
+        qNum,
+        chosenAnswer
+      );
       onUpdateResult(updated);
+
+      // 2. Also notify backend API in the background (gracefully catches offline/fallback)
+      try {
+        await fetch("/api/grading/correct", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            current_result: gradingResult,
+            correction: {
+              question_number: qNum,
+              corrected_answer: chosenAnswer,
+            },
+          }),
+        });
+      } catch {
+        // Backend offline is non-fatal since client state is already updated
+      }
     } catch (err) {
-      console.error(err);
+      console.error("Error applying manual verification:", err);
     } finally {
       setIsSubmitting(false);
     }
@@ -87,7 +108,7 @@ export const Step4ReviewDetection: React.FC<Step4ReviewDetectionProps> = ({
       </div>
 
       {/* Review Status Banner */}
-      {uncertainQuestions.length === 0 ? (
+      {reviewQuestions.length === 0 ? (
         <div className="p-8 rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-center">
           <div className="w-12 h-12 rounded-full bg-emerald-100 dark:bg-emerald-900 text-emerald-600 dark:text-emerald-300 flex items-center justify-center mx-auto mb-3">
             <CheckCircle2 className="w-6 h-6" />
@@ -108,33 +129,63 @@ export const Step4ReviewDetection: React.FC<Step4ReviewDetectionProps> = ({
         </div>
       ) : (
         <div className="space-y-4">
-          <div className="p-4 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/80 flex items-center justify-between text-xs sm:text-sm text-amber-800 dark:text-amber-300">
-            <div className="flex items-center gap-2">
-              <AlertCircle className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0" />
-              <span>
-                <strong>{uncertainQuestions.length} question(s)</strong> require examiner confirmation due to multiple marks or weak shading.
-              </span>
+          {pendingCount === 0 ? (
+            <div className="p-4 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs sm:text-sm text-emerald-800 dark:text-emerald-300">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-5 h-5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                <span>
+                  <strong>All {reviewQuestions.length} ambiguous item(s) have been verified!</strong> You can now finalize the scorecard.
+                </span>
+              </div>
+              <button
+                onClick={onProceed}
+                className="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition shadow-xs flex items-center gap-1 self-start sm:self-auto"
+              >
+                <span>Proceed to Scorecard</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </button>
             </div>
-            <button
-              onClick={onProceed}
-              className="text-xs font-bold text-amber-900 dark:text-amber-200 underline hover:no-underline"
-            >
-              Skip &amp; Keep System Flags
-            </button>
-          </div>
+          ) : (
+            <div className="p-4 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/80 flex items-center justify-between text-xs sm:text-sm text-amber-800 dark:text-amber-300">
+              <div className="flex items-center gap-2">
+                <AlertCircle className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0" />
+                <span>
+                  <strong>{pendingCount} question(s)</strong> require examiner confirmation ({verifiedCount} verified).
+                </span>
+              </div>
+              <button
+                onClick={onProceed}
+                className="text-xs font-bold text-amber-900 dark:text-amber-200 underline hover:no-underline"
+              >
+                Skip &amp; Keep System Flags
+              </button>
+            </div>
+          )}
 
           {/* List of uncertain questions */}
           <div className="space-y-3">
-            {uncertainQuestions.map((q) => {
+            {reviewQuestions.map((q) => {
               const localNum = q.local_question_number ?? (((q.question_number - 1) % 40) + 1);
+              const isVerified = !q.needs_review && q.status !== "ambiguous";
+
               return (
               <div
                 key={q.question_number}
-                className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-amber-300 dark:border-amber-800/60 shadow-xs"
+                className={`p-5 rounded-2xl bg-white dark:bg-slate-900 border transition shadow-xs ${
+                  isVerified
+                    ? "border-emerald-300 dark:border-emerald-800/60 ring-1 ring-emerald-500/20"
+                    : "border-amber-300 dark:border-amber-800/60"
+                }`}
               >
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
                   <div className="flex items-center gap-2">
-                    <span className="w-10 h-8 rounded-lg bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-400 font-extrabold text-xs flex items-center justify-center">
+                    <span
+                      className={`w-10 h-8 rounded-lg font-extrabold text-xs flex items-center justify-center ${
+                        isVerified
+                          ? "bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-400"
+                          : "bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-400"
+                      }`}
+                    >
                       #{localNum}
                     </span>
                     <div>
@@ -143,33 +194,56 @@ export const Step4ReviewDetection: React.FC<Step4ReviewDetectionProps> = ({
                       </h4>
                       <p className="text-xs text-slate-500 dark:text-slate-400">
                         Correct Answer: <strong className="text-slate-700 dark:text-slate-200">{q.correct_answer}</strong> • Detected:{" "}
-                        <strong className="text-amber-600 dark:text-amber-400">{q.student_answer || "Unclear"}</strong>
+                        <strong className={isVerified ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400"}>
+                          {q.student_answer || "Unclear / Blank"}
+                        </strong>
+                        {isVerified && (
+                          <span className="ml-2 font-mono text-[10px] text-emerald-600 dark:text-emerald-400">
+                            (Verified ✓)
+                          </span>
+                        )}
                       </p>
                     </div>
                   </div>
 
-                  <span className="text-xs px-2.5 py-1 rounded-full bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300 font-semibold self-start sm:self-auto">
-                    Multiple / Weak Mark
-                  </span>
+                  {isVerified ? (
+                    <span className="text-xs px-2.5 py-1 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 font-bold flex items-center gap-1 self-start sm:self-auto border border-emerald-300 dark:border-emerald-800">
+                      <Check className="w-3.5 h-3.5" />
+                      Verified: Option {q.student_answer || "Void"}
+                    </span>
+                  ) : (
+                    <span className="text-xs px-2.5 py-1 rounded-full bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300 font-semibold self-start sm:self-auto border border-amber-300 dark:border-amber-800">
+                      Multiple / Weak Mark
+                    </span>
+                  )}
                 </div>
 
                 {/* Shading fill ratios visual breakdown */}
                 <div className="mb-4 grid grid-cols-4 gap-2 text-center text-xs">
-                  {q.choices.map((c) => (
-                    <div
-                      key={c.id}
-                      className={`p-2 rounded-xl border ${
-                        c.is_marked
-                          ? "border-amber-400 bg-amber-50 dark:bg-amber-950/40 text-amber-900 dark:text-amber-200 font-bold"
-                          : "border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-400"
-                      }`}
-                    >
-                      <div className="font-bold text-sm">{c.id}</div>
-                      <div className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
-                        Fill: {Math.round(c.fill_ratio * 100)}%
+                  {q.choices.map((c) => {
+                    const isSelected = q.student_answer === c.id;
+
+                    return (
+                      <div
+                        key={c.id}
+                        className={`p-2 rounded-xl border transition ${
+                          isSelected
+                            ? "border-blue-500 bg-blue-50 dark:bg-blue-950/50 text-blue-900 dark:text-blue-200 font-bold ring-2 ring-blue-500/30"
+                            : c.is_marked
+                            ? "border-amber-400 bg-amber-50 dark:bg-amber-950/40 text-amber-900 dark:text-amber-200 font-bold"
+                            : "border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-400"
+                        }`}
+                      >
+                        <div className="font-bold text-sm flex items-center justify-center gap-1">
+                          <span>{c.id}</span>
+                          {isSelected && <Check className="w-3 h-3 text-blue-500" />}
+                        </div>
+                        <div className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
+                          Fill: {Math.round(c.fill_ratio * 100)}%
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
 
                 {/* Examiner Manual Override Choices */}
@@ -177,24 +251,36 @@ export const Step4ReviewDetection: React.FC<Step4ReviewDetectionProps> = ({
                   <span className="text-xs text-slate-500 font-medium mr-1">
                     Select verified mark:
                   </span>
-                  {["A", "B", "C", "D"].map((opt) => (
-                    <button
-                      key={opt}
-                      onClick={() => handleCorrectQuestion(q.question_number, opt)}
-                      disabled={isSubmitting}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${
-                        q.student_answer === opt
-                          ? "bg-blue-600 text-white shadow-xs"
-                          : "bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700"
-                      }`}
-                    >
-                      Option {opt}
-                    </button>
-                  ))}
+                  {["A", "B", "C", "D"].map((opt) => {
+                    const isSelected = q.student_answer === opt;
+                    return (
+                      <button
+                        key={opt}
+                        type="button"
+                        onClick={() => handleCorrectQuestion(q.question_number, opt)}
+                        disabled={isSubmitting}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer active:scale-95 ${
+                          isSelected
+                            ? "bg-blue-600 text-white shadow-xs ring-2 ring-blue-400/50"
+                            : "bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700"
+                        }`}
+                        title={`Select Option ${opt} as the verified mark`}
+                      >
+                        {isSelected && <Check className="w-3.5 h-3.5" />}
+                        <span>Option {opt}</span>
+                      </button>
+                    );
+                  })}
                   <button
+                    type="button"
                     onClick={() => handleCorrectQuestion(q.question_number, "BLANK")}
                     disabled={isSubmitting}
-                    className="px-3 py-1.5 rounded-lg text-xs font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700"
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer active:scale-95 ${
+                      q.student_answer === null || q.student_answer === "BLANK"
+                        ? "bg-slate-800 text-white font-bold ring-2 ring-slate-400/40"
+                        : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700"
+                    }`}
+                    title="Mark this question as unanswered or voided"
                   >
                     Confirm Blank / Void
                   </button>
