@@ -138,44 +138,12 @@ export async function processImageClientSide(
   // Mark threshold adapts to ambient paper brightness (pencil/pen mark is significantly darker)
   const darkThreshold = Math.max(50, Math.min(185, paperLum * 0.78));
 
-  // Detect layout by checking ink distribution in top 15% (rows 250 to 500)
-  // In the compact 4-column exam sheet, questions 1-5 start immediately at the top.
-  // In a full-page scan with a large header, the top 15% is white/title.
-  let topInkCount = 0;
-  let topTotalCount = 0;
-  for (let y = 250; y < 500; y += 8) {
-    for (let x = 100; x < targetWidth - 100; x += 8) {
-      const idx = (y * targetWidth + x) * 4;
-      const lum = 0.299 * pixels[idx] + 0.587 * pixels[idx + 1] + 0.114 * pixels[idx + 2];
-      if (lum < darkThreshold) topInkCount++;
-      topTotalCount++;
-    }
-  }
-  const topInkDensity = topTotalCount > 0 ? topInkCount / topTotalCount : 0;
+  // Deterministically evaluate layout contrast scores: Compact vs Full Sheet
+  const compactScore = evaluateLayoutScore(pixels, targetWidth, targetHeight, darkThreshold, true);
+  const fullScore = evaluateLayoutScore(pixels, targetWidth, targetHeight, darkThreshold, false);
 
-  // Also check leftmost ink position in middle rows (questions column 1 numbering)
-  let firstInkX = targetWidth;
-  for (let x = 40; x < 300; x += 4) {
-    let colDark = 0;
-    for (let y = 1000; y < 2000; y += 16) {
-      const idx = (y * targetWidth + x) * 4;
-      const lum = 0.299 * pixels[idx] + 0.587 * pixels[idx + 1] + 0.114 * pixels[idx + 2];
-      if (lum < darkThreshold) colDark++;
-    }
-    if (colDark > 4) {
-      firstInkX = x;
-      break;
-    }
-  }
-
-  // Compute effective aspect ratio based on rotation
-  const effectiveW = effectiveRotation === 90 || effectiveRotation === 270 ? origH : origW;
-  const effectiveH = effectiveRotation === 90 || effectiveRotation === 270 ? origW : origH;
-  const aspectRatio = effectiveH / effectiveW;
-
-  // Compact 4-column sheet has questions starting near the top (topInkDensity > 0.04)
-  // or question numbering close to the left border (firstInkX < 115) or aspect ratio < 1.45
-  const isCompactSheet = topInkDensity > 0.04 || firstInkX < 115 || aspectRatio < 1.45;
+  // If contrast score decisively favors compact (score > 1.25 * fullScore and compactScore >= 2.5), use compact
+  const isCompactSheet = compactScore > fullScore * 1.25 && compactScore >= 2.5;
 
   // Proportional column coordinates for compact 4-column sheets (exact relative centers)
   const COMPACT_COLUMN_CENTERS: Record<string, number>[] = [
@@ -611,3 +579,85 @@ function detectPaperCrop(
 
   return { cropX: 0, cropY: 0, cropW: w, cropH: h };
 }
+
+/**
+ * Evaluates the fill contrast score of a candidate layout (Compact vs Full Sheet)
+ * by sampling representative rows directly against the thresholded image pixels.
+ * A marked bubble yields high contrast (top fill minus second fill), producing a high score.
+ */
+function evaluateLayoutScore(
+  pixels: Uint8ClampedArray,
+  targetW: number,
+  targetH: number,
+  darkThresh: number,
+  isCompact: boolean
+): number {
+  let gY0: number;
+  let gY1: number;
+  let cols: Record<string, number>[];
+  let bW: number;
+  let bH: number;
+
+  if (isCompact) {
+    gY0 = 0.1045 * targetH;
+    gY1 = 0.9707 * targetH;
+    cols = [
+      { A: 0.0882 * targetW, B: 0.1330 * targetW, C: 0.1777 * targetW, D: 0.2212 * targetW },
+      { A: 0.3297 * targetW, B: 0.3745 * targetW, C: 0.4193 * targetW, D: 0.4627 * targetW },
+      { A: 0.5712 * targetW, B: 0.6160 * targetW, C: 0.6594 * targetW, D: 0.7042 * targetW },
+      { A: 0.8128 * targetW, B: 0.8562 * targetW, C: 0.9009 * targetW, D: 0.9457 * targetW },
+    ];
+    bW = Math.round(0.018 * targetW);
+    bH = Math.round(0.012 * targetH);
+  } else {
+    gY0 = (ROW_START_Y_PT / PAGE_HEIGHT_PT) * targetH;
+    gY1 = ((ROW_START_Y_PT + 39 * ROW_STEP_Y_PT) / PAGE_HEIGHT_PT) * targetH;
+    const PDF_GRID_W = 512.3 - 71.2;
+    const gX0 = (71.2 / PAGE_WIDTH_PT) * targetW;
+    const gX1 = (512.3 / PAGE_WIDTH_PT) * targetW;
+    const gScaleX = (gX1 - gX0) / PDF_GRID_W;
+    cols = [
+      { A: gX0 + (71.2 - 71.2) * gScaleX, B: gX0 + (94.1 - 71.2) * gScaleX, C: gX0 + (117.0 - 71.2) * gScaleX, D: gX0 + (139.7 - 71.2) * gScaleX },
+      { A: gX0 + (195.4 - 71.2) * gScaleX, B: gX0 + (218.3 - 71.2) * gScaleX, C: gX0 + (241.1 - 71.2) * gScaleX, D: gX0 + (264.0 - 71.2) * gScaleX },
+      { A: gX0 + (319.5 - 71.2) * gScaleX, B: gX0 + (342.5 - 71.2) * gScaleX, C: gX0 + (365.3 - 71.2) * gScaleX, D: gX0 + (388.2 - 71.2) * gScaleX },
+      { A: gX0 + (443.7 - 71.2) * gScaleX, B: gX0 + (466.6 - 71.2) * gScaleX, C: gX0 + (489.5 - 71.2) * gScaleX, D: gX0 + (512.3 - 71.2) * gScaleX },
+    ];
+    bW = Math.round((12.0 / PAGE_WIDTH_PT) * targetW);
+    bH = Math.round((12.0 / PAGE_HEIGHT_PT) * targetH);
+  }
+
+  const gStepY = (gY1 - gY0) / 39.0;
+  const coreW = Math.max(4, Math.round(bW * 0.22));
+  const coreH = Math.max(4, Math.round(bH * 0.22));
+
+  let score = 0;
+  const testRows = [1, 3, 5, 10, 15, 20, 30, 38];
+  for (const qIdx of testRows) {
+    const yC = Math.round(gY0 + (qIdx - 1) * gStepY);
+    if (yC < 10 || yC >= targetH - 10) continue;
+    for (let s = 0; s < 4; s++) {
+      const fills: number[] = [];
+      for (const opt of ["A", "B", "C", "D"]) {
+        const xC = Math.round(cols[s][opt]);
+        if (xC < 10 || xC >= targetW - 10) continue;
+        let dark = 0;
+        let total = 0;
+        for (let py = yC - coreH; py <= yC + coreH; py += 2) {
+          for (let px = xC - coreW; px <= xC + coreW; px += 2) {
+            const idx = (py * targetW + px) * 4;
+            const lum = 0.299 * pixels[idx] + 0.587 * pixels[idx + 1] + 0.114 * pixels[idx + 2];
+            if (lum < darkThresh) dark++;
+            total++;
+          }
+        }
+        fills.push(total > 0 ? dark / total : 0);
+      }
+      if (fills.length === 4) {
+        fills.sort((a, b) => b - a);
+        score += (fills[0] - fills[1]);
+      }
+    }
+  }
+  return score;
+}
+

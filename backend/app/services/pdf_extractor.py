@@ -135,15 +135,25 @@ def _try_extract_aiscc_vector(page: pymupdf.Page) -> Optional[AnswerKeyData]:
             else:
                 answers[q_str] = "BLANK"
                 
+    filled_count = sum(1 for v in answers.values() if v != "BLANK")
+    is_blank = (filled_count == 0)
+
+    title = "AISCC Qualifying Examination Answer Key" if not is_blank else "AISCC Qualifying Exam Sheet (Blank Sheet Template)"
+    description = (
+        f"Extracted {filled_count} shaded answers directly from AISCC 4-column vector exam answer sheet (160 Questions)."
+        if not is_blank
+        else "Notice: No shaded bubbles detected on this page (all 160 questions are blank). Please upload the shaded sample key or manually assign answers."
+    )
+
     return AnswerKeyData(
-        title="AISCC Qualifying Examination Answer Key",
-        description="Extracted directly from AISCC 4-column vector exam answer sheet (160 Questions).",
+        title=title,
+        description=description,
         total_questions=160,
         sections=AISCC_SECTIONS,
         answers=answers,
         section_mapping=section_mapping,
         choices_per_question=4,
-        is_verified=True
+        is_verified=(filled_count >= 10)
     )
 
 def _try_extract_text_key(doc: pymupdf.Document) -> Optional[AnswerKeyData]:

@@ -13,7 +13,8 @@ import {
   ArrowLeft,
   VideoOff,
   SwitchCamera,
-  Grid
+  Grid,
+  FileText
 } from "lucide-react";
 import { AnswerKeyData, GradingResult, GradingRules } from "@/types/grading";
 import { processImageClientSide } from "@/utils/clientOmr";
@@ -210,7 +211,19 @@ export const Step3ScanSheet: React.FC<Step3ScanSheetProps> = ({
         setIsProcessing(false);
         return;
       }
-    } catch (err) {
+
+      const isPdf = imageFile.type === "application/pdf" || imageFile.name.toLowerCase().endsWith(".pdf");
+      if (isPdf) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.detail || "FastAPI grading engine failed to process the PDF answer sheet. Please verify backend status.");
+      }
+    } catch (err: any) {
+      const isPdf = imageFile.type === "application/pdf" || imageFile.name.toLowerCase().endsWith(".pdf");
+      if (isPdf) {
+        setErrorMsg(err.message || "Failed to process PDF answer sheet. Please ensure port 8001 is running.");
+        setIsProcessing(false);
+        return;
+      }
       // Python backend offline, fall through to client OMR engine
       console.warn("FastAPI engine unavailable, running client-side OMR:", err);
     }
@@ -413,13 +426,30 @@ export const Step3ScanSheet: React.FC<Step3ScanSheetProps> = ({
               </div>
             ) : capturedImage ? (
               <div className="relative w-full h-full flex flex-col items-center justify-center p-3">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={capturedImage}
-                  alt="Scanned Sheet Preview"
-                  style={{ transform: `rotate(${rotation}deg)` }}
-                  className="max-h-full max-w-full w-auto object-contain transition-transform duration-200 rounded-lg shadow-lg border border-slate-700/60"
-                />
+                {imageFile?.type === "application/pdf" || imageFile?.name.toLowerCase().endsWith(".pdf") ? (
+                  <div className="flex flex-col items-center justify-center p-8 bg-slate-900/90 rounded-2xl border border-blue-500/30 text-center max-w-sm mx-auto shadow-2xl my-auto animate-in fade-in duration-200">
+                    <div className="w-16 h-16 rounded-2xl bg-blue-600/20 text-blue-400 flex items-center justify-center mb-3 border border-blue-500/30 shadow-inner">
+                      <FileText className="w-8 h-8 text-blue-400" />
+                    </div>
+                    <h3 className="text-sm font-bold text-white mb-1 truncate max-w-[260px]">
+                      {imageFile.name}
+                    </h3>
+                    <span className="text-[11px] px-2.5 py-0.5 rounded-full bg-blue-500/10 text-blue-300 border border-blue-500/20 font-medium mb-3">
+                      PDF Document • {(imageFile.size / 1024).toFixed(0)} KB
+                    </span>
+                    <p className="text-xs text-slate-300 max-w-[280px]">
+                      Single-page CAAP Qualifying Exam Sheet loaded. Ready for OpenCV sub-pixel alignment and mark grading.
+                    </p>
+                  </div>
+                ) : (
+                  /* eslint-disable-next-line @next/next/no-img-element */
+                  <img
+                    src={capturedImage}
+                    alt="Scanned Sheet Preview"
+                    style={{ transform: `rotate(${rotation}deg)` }}
+                    className="max-h-full max-w-full w-auto object-contain transition-transform duration-200 rounded-lg shadow-lg border border-slate-700/60"
+                  />
+                )}
 
                 <div className="absolute top-3 right-3 flex items-center gap-2 z-20">
                   <button

@@ -102,6 +102,28 @@ export const Step2VerifyKey: React.FC<Step2VerifyKeyProps> = ({
         </div>
       </div>
 
+      {blankCount >= 40 && (
+        <div className="mb-6 p-4 rounded-xl bg-amber-50 dark:bg-amber-950/60 border border-amber-300 dark:border-amber-800 flex items-start gap-3 text-amber-900 dark:text-amber-200 text-xs shadow-xs">
+          <AlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <p className="font-bold text-sm text-amber-900 dark:text-amber-100">
+              Notice: {blankCount} Unshaded / Blank Questions Detected
+            </p>
+            <p className="mt-1 leading-relaxed text-amber-800 dark:text-amber-300">
+              You may have uploaded the <strong>Blank Answer Sheet</strong> (File 1) instead of the <strong>Shaded Answer Key</strong> (File 2). If you proceed to Step 3 with a blank key, any student answer will be marked as incorrect.
+            </p>
+            <div className="mt-2.5 flex items-center gap-2">
+              <button
+                onClick={onBack}
+                className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg font-semibold text-xs transition cursor-pointer"
+              >
+                ← Back to Upload Shaded Key
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Key Stats Bar */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
         <div className="p-4 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">

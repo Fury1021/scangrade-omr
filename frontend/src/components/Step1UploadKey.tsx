@@ -44,6 +44,15 @@ export const Step1UploadKey: React.FC<Step1UploadKeyProps> = ({ onKeyLoaded }) =
       }
 
       const keyData: AnswerKeyData = await res.json();
+      const blankCount = Object.values(keyData.answers).filter(
+        (a) => !a || a === "BLANK"
+      ).length;
+
+      if (blankCount >= 100) {
+        setErrorMsg(
+          "⚠️ Notice: The uploaded PDF appears to be the Blank Answer Sheet (0 shaded answers detected). To configure the answer key automatically, please upload the sample file with shaded answers (File 2) or click 'Load Sample AISCC Key' below."
+        );
+      }
       onKeyLoaded(keyData);
     } catch (err: any) {
       setErrorMsg(err.message || "Failed to process PDF answer key.");
@@ -97,7 +106,7 @@ export const Step1UploadKey: React.FC<Step1UploadKeyProps> = ({ onKeyLoaded }) =
 
   return (
     <div className="max-w-4xl mx-auto py-8 px-4 animate-in fade-in duration-300">
-      <div className="text-center mb-8">
+      <div className="text-center mb-6">
         <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300 border border-blue-200 dark:border-blue-800 mb-3">
           Step 1 of 5 • Answer Key Setup
         </span>
@@ -109,11 +118,25 @@ export const Step1UploadKey: React.FC<Step1UploadKeyProps> = ({ onKeyLoaded }) =
         </p>
       </div>
 
+      {/* Helpful format guide */}
+      <div className="mb-6 p-4 rounded-xl bg-blue-50/70 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900/60 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-slate-700 dark:text-slate-300">
+        <div className="flex items-start gap-2.5">
+          <FileText className="w-5 h-5 text-blue-600 dark:text-blue-400 shrink-0 mt-0.5" />
+          <div>
+            <span className="font-bold text-slate-900 dark:text-white">AISCC Document Formats:</span>
+            <p className="mt-0.5 text-slate-600 dark:text-slate-400">
+              • <strong>File 2 (Sample / Shaded Key):</strong> Upload this here in Step 1 to set the correct answers.<br />
+              • <strong>File 1 (Blank Sheet):</strong> Give this to examinees. Scan completed student sheets in Step 3.
+            </p>
+          </div>
+        </div>
+      </div>
+
       {errorMsg && (
-        <div className="mb-6 p-4 rounded-xl bg-red-50 dark:bg-red-950/50 border border-red-200 dark:border-red-900 flex items-start gap-3 text-red-700 dark:text-red-300">
-          <AlertCircle className="w-5 h-5 mt-0.5 shrink-0" />
+        <div className="mb-6 p-4 rounded-xl bg-amber-50 dark:bg-amber-950/50 border border-amber-300 dark:border-amber-900 flex items-start gap-3 text-amber-800 dark:text-amber-300">
+          <AlertCircle className="w-5 h-5 mt-0.5 shrink-0 text-amber-600" />
           <div className="text-sm">
-            <p className="font-semibold">Upload Error</p>
+            <p className="font-semibold">Notice</p>
             <p>{errorMsg}</p>
           </div>
         </div>
