@@ -50,6 +50,7 @@ export const Step3ScanSheet: React.FC<Step3ScanSheetProps> = ({
   const videoRef = useRef<HTMLVideoElement>(null);
   const [cameraActive, setCameraActive] = useState<boolean>(false);
   const [cameraFacing, setCameraFacing] = useState<"environment" | "user">("environment");
+  const [scannerOrientation, setScannerOrientation] = useState<"portrait" | "landscape">("portrait");
   const mediaStreamRef = useRef<MediaStream | null>(null);
 
   // Advanced Rules
@@ -71,12 +72,13 @@ export const Step3ScanSheet: React.FC<Step3ScanSheetProps> = ({
       if (mediaStreamRef.current) {
         mediaStreamRef.current.getTracks().forEach((track) => track.stop());
       }
-      const isPortrait = typeof window !== "undefined" && window.innerHeight > window.innerWidth;
+      const isPortrait = scannerOrientation === "portrait";
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
           facingMode: cameraFacing,
-          width: { ideal: isPortrait ? 1440 : 1920 },
-          height: { ideal: isPortrait ? 1920 : 1440 },
+          width: { ideal: isPortrait ? 1080 : 1920 },
+          height: { ideal: isPortrait ? 1920 : 1080 },
+          aspectRatio: { ideal: isPortrait ? 612 / 936 : 936 / 612 },
         },
       });
       mediaStreamRef.current = stream;
@@ -108,7 +110,7 @@ export const Step3ScanSheet: React.FC<Step3ScanSheetProps> = ({
     return () => {
       stopCamera();
     };
-  }, [activeTab, cameraFacing]);
+  }, [activeTab, cameraFacing, scannerOrientation]);
 
   const snapPhoto = () => {
     if (!videoRef.current) return;
@@ -305,10 +307,38 @@ export const Step3ScanSheet: React.FC<Step3ScanSheetProps> = ({
             {/* Guide Grid Controls (only for live camera viewfinder) */}
             {activeTab === "camera" && !capturedImage && (
               <div className="flex items-center gap-2">
+                {/* Scanner Orientation Mode: Portrait Sheet (Default) vs Landscape */}
+                <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-0.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => setScannerOrientation("portrait")}
+                    className={`px-2.5 py-1 rounded-lg font-semibold flex items-center gap-1.5 transition cursor-pointer ${
+                      scannerOrientation === "portrait"
+                        ? "bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-400 shadow-xs font-bold"
+                        : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200"
+                    }`}
+                    title="Portrait Sheet Mode (612 × 936 vertical paper format)"
+                  >
+                    <span>📱 Portrait Sheet</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setScannerOrientation("landscape")}
+                    className={`px-2.5 py-1 rounded-lg font-semibold flex items-center gap-1.5 transition cursor-pointer ${
+                      scannerOrientation === "landscape"
+                        ? "bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-400 shadow-xs font-bold"
+                        : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200"
+                    }`}
+                    title="Landscape View (936 × 612 horizontal view)"
+                  >
+                    <span>🔄 Landscape</span>
+                  </button>
+                </div>
+
                 <button
                   type="button"
                   onClick={() => setShowGuideGrid((prev) => !prev)}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition border ${
+                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition border cursor-pointer ${
                     showGuideGrid
                       ? "bg-cyan-50 dark:bg-cyan-950/60 text-cyan-700 dark:text-cyan-300 border-cyan-300 dark:border-cyan-800 shadow-xs"
                       : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700 hover:text-slate-900"
@@ -333,9 +363,15 @@ export const Step3ScanSheet: React.FC<Step3ScanSheetProps> = ({
           </div>
 
           {/* Viewport Area */}
-          <div className="relative flex-1 min-h-[480px] sm:min-h-[560px] h-[55vh] max-h-[720px] bg-slate-950 rounded-xl overflow-hidden flex items-center justify-center border border-slate-800">
+          <div className="relative flex-1 w-full bg-slate-950 rounded-2xl overflow-hidden flex items-center justify-center border border-slate-800 p-2 sm:p-4 min-h-[460px]">
             {activeTab === "camera" && !capturedImage ? (
-              <div className="relative w-full h-full flex items-center justify-center bg-black">
+              <div
+                className={`relative overflow-hidden rounded-xl border border-slate-700/60 shadow-2xl transition-all duration-300 flex items-center justify-center bg-black ${
+                  scannerOrientation === "portrait"
+                    ? "w-full max-w-[430px] sm:max-w-[460px] aspect-[612/936] max-h-[680px]"
+                    : "w-full aspect-[936/612] max-h-[560px]"
+                }`}
+              >
                 <video
                   ref={videoRef}
                   autoPlay
@@ -345,7 +381,13 @@ export const Step3ScanSheet: React.FC<Step3ScanSheetProps> = ({
                 />
                 
                 {/* Visual Alignment Guide Frame with 4-Column Grid for live camera aiming */}
-                {showGuideGrid && <ScanGuideGrid mode={gridMode} opacity={0.9} />}
+                {showGuideGrid && (
+                  <ScanGuideGrid
+                    mode={gridMode}
+                    opacity={0.9}
+                    orientation={scannerOrientation}
+                  />
+                )}
 
                 {/* Camera Buttons Floating */}
                 <div className="absolute bottom-4 inset-x-0 flex items-center justify-center gap-3 z-20 px-4">
@@ -355,14 +397,14 @@ export const Step3ScanSheet: React.FC<Step3ScanSheetProps> = ({
                         prev === "environment" ? "user" : "environment"
                       )
                     }
-                    className="p-3 rounded-full bg-slate-900/80 text-white hover:bg-slate-800 transition backdrop-blur-md border border-slate-700/60 shadow-lg active:scale-95"
+                    className="p-3 rounded-full bg-slate-900/80 text-white hover:bg-slate-800 transition backdrop-blur-md border border-slate-700/60 shadow-lg active:scale-95 cursor-pointer"
                     title="Switch Camera"
                   >
                     <SwitchCamera className="w-5 h-5" />
                   </button>
                   <button
                     onClick={snapPhoto}
-                    className="px-6 py-3 rounded-full bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm shadow-xl shadow-blue-500/30 active:scale-95 transition flex items-center gap-2 border border-blue-400/40"
+                    className="px-6 py-3 rounded-full bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm shadow-xl shadow-blue-500/30 active:scale-95 transition flex items-center gap-2 border border-blue-400/40 cursor-pointer"
                   >
                     <Camera className="w-5 h-5" />
                     Snap Answer Sheet

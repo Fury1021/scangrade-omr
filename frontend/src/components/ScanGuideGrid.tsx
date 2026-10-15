@@ -7,6 +7,7 @@ interface ScanGuideGridProps {
   opacity?: number;
   showCornerTargets?: boolean;
   showLabels?: boolean;
+  orientation?: "portrait" | "landscape";
 }
 
 export const ScanGuideGrid: React.FC<ScanGuideGridProps> = ({
@@ -14,12 +15,20 @@ export const ScanGuideGrid: React.FC<ScanGuideGridProps> = ({
   opacity = 0.90,
   showCornerTargets = true,
   showLabels = true,
+  orientation = "portrait",
 }) => {
+  const isLandscape = orientation === "landscape";
+  const aspectRatio = isLandscape ? "936 / 612" : "612 / 936";
+
   return (
-    <div className="absolute inset-0 pointer-events-none z-10 flex items-center justify-center p-3 sm:p-5 pb-20 select-none">
+    <div className="absolute inset-0 pointer-events-none z-10 flex items-center justify-center p-2 sm:p-4 pb-20 select-none">
       <div
-        className="h-full max-h-[84%] w-auto max-w-[86%] relative flex flex-col justify-between transition-opacity duration-200"
-        style={{ aspectRatio: "612 / 936", opacity }}
+        className={`w-auto relative flex flex-col justify-between transition-all duration-300 ${
+          isLandscape
+            ? "h-full max-h-[88%] max-w-[94%]"
+            : "h-full max-h-[92%] max-w-[90%]"
+        }`}
+        style={{ aspectRatio, opacity }}
       >
       {/* Corner Bracket Targets */}
       {showCornerTargets && (
